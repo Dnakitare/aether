@@ -1,0 +1,17 @@
+# Claude Solo Dev - Recommended Plugins
+# These are installed automatically by install.sh
+
+# Core plugins
+ralph-wiggum
+security-guidance
+commit-commands
+
+# Development utilities
+feature-dev
+
+# Optional - uncomment based on your stack
+# frontend-design
+# typescript-lsp
+# pyright-lsp
+# gopls-lsp
+# rust-analyzer-lsp

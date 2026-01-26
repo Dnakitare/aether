@@ -1,0 +1,74 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+
+# Dependency directories
+vendor/
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Secrets
+secrets/
+*.key
+*.pem
+*.crt
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Firecracker specific
+/firecracker/
+*.socket
+
+# Coverage reports
+coverage.txt
+coverage.html
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Docker
+docker-compose.override.yml
+
+# Scratchpad (Claude Code temporary files)
+.claude/scratchpad/

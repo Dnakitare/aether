@@ -1,0 +1,61 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(yarn *)",
+      "Bash(pnpm *)",
+      "Bash(pytest*)",
+      "Bash(python -m pytest*)",
+      "Bash(go test*)",
+      "Bash(go build*)",
+      "Bash(cargo test*)",
+      "Bash(cargo build*)",
+      "Bash(make *)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git branch*)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/credentials*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/auto-format.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/type-check.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/reflect.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "model": "sonnet"
+}
