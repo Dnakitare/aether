@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Redis for state management
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # PostgreSQL for durable storage
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aether
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: aether_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Kafka for event streaming (Phase 5)
+  # Commented out for Phase 1, will be enabled in Phase 5
+  # zookeeper:
+  #   image: confluentinc/cp-zookeeper:latest
+  #   environment:
+  #     ZOOKEEPER_CLIENT_PORT: 2181
+  #     ZOOKEEPER_TICK_TIME: 2000
+  #   ports:
+  #     - "2181:2181"
+
+  # kafka:
+  #   image: confluentinc/cp-kafka:latest
+  #   depends_on:
+  #     - zookeeper
+  #   environment:
+  #     KAFKA_BROKER_ID: 1
+  #     KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+  #     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  #   ports:
+  #     - "9092:9092"
+
+  # Prometheus for metrics (Phase 4)
+  # Commented out for Phase 1
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   volumes:
+  #     - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus-data:/prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+
+  # Grafana for dashboards (Phase 4)
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   depends_on:
+  #     - prometheus
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: admin
+  #   volumes:
+  #     - ../grafana/dashboards:/etc/grafana/provisioning/dashboards
+  #     - ../grafana/datasources:/etc/grafana/provisioning/datasources
+  #     - grafana-data:/var/lib/grafana
+  #   ports:
+  #     - "3000:3000"
+
+volumes:
+  redis-data:
+  postgres-data:
+  # prometheus-data:
+  # grafana-data:
