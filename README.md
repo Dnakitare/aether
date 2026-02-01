@@ -20,17 +20,25 @@ Aether is a production-grade runtime for AI agents, providing secure isolation, 
 - ✅ **JWT authentication** with role-based access control (RBAC)
 - ✅ **Resource reservations** with TTL-based expiry
 
+### Phase 3 (Complete)
+- ✅ **Network isolation** with per-tenant subnets and firewall rules
+- ✅ **Secrets management** with HashiCorp Vault (KV v2 engine)
+- ✅ **Audit logging** with PostgreSQL for immutable event trail
+- ✅ **API key management** for service account authentication
+- ✅ **Redis state persistence** with distributed locking and sessions
+- ✅ **Defense in depth** security architecture
+
 ### Coming Soon
-- 🔄 **Multi-tenant isolation** with network separation (Phase 3)
-- 🔄 **Secrets management** with HashiCorp Vault (Phase 3)
 - 🔄 **Full observability** with OpenTelemetry and distributed tracing (Phase 4)
 - 🔄 **Event-driven messaging** via Kafka (Phase 5)
+- 🔄 **Rate limiting** with token bucket algorithm (Phase 5)
 - 🔄 **High availability** and disaster recovery (Phase 6)
 
 ## Status
 
 ✅ **Phase 1 Complete** - Foundation (VM lifecycle, basic runtime)
 ✅ **Phase 2 Complete** - Orchestration (scheduler, auto-scaling, HTTP API, auth)
+✅ **Phase 3 Complete** - Security (network isolation, secrets, audit logs, state persistence)
 
 ## Architecture
 
@@ -38,10 +46,10 @@ Aether uses Firecracker microVMs to provide lightweight, secure isolation for AI
 
 ### Key Components
 
-- **Runtime** - VM lifecycle and resource management
-- **Scheduler** - Intelligent agent placement and auto-scaling
-- **Observability** - Structured logging, metrics, and distributed tracing
-- **Security** - Multi-tenant isolation, secrets management, behavioral monitoring
+- **Runtime** - VM lifecycle and resource management with Firecracker microVMs
+- **Scheduler** - Intelligent agent placement with bin-packing, spread, and best-fit strategies
+- **Security** - Network isolation, Vault secrets, audit logging, API key management, state persistence
+- **Observability** - Structured logging with slog (distributed tracing coming in Phase 4)
 
 ## Getting Started
 
