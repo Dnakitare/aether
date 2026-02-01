@@ -1,0 +1,87 @@
+groups:
+  - name: aether_agents
+    interval: 30s
+    rules:
+      - alert: HighAgentErrorRate
+        expr: rate(aether_agent_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High agent error rate detected"
+          description: "Agent error rate is {{ $value }} errors/sec for tenant {{ $labels.tenant_id }}"
+
+      - alert: AgentStartupSlow
+        expr: histogram_quantile(0.95, rate(aether_agent_startup_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow agent startup times"
+          description: "P95 agent startup time is {{ $value }}s for tenant {{ $labels.tenant_id }}"
+
+  - name: aether_api
+    interval: 30s
+    rules:
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(aether_api_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "P95 API latency is {{ $value }}s for endpoint {{ $labels.endpoint }}"
+
+      - alert: HighAPIErrorRate
+        expr: rate(aether_api_requests_total{status=~"5.."}[5m]) / rate(aether_api_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate is {{ $value | humanizePercentage }} for endpoint {{ $labels.endpoint }}"
+
+  - name: aether_resources
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: sum(aether_cpu_usage_cores) by (tenant_id) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage for tenant"
+          description: "Tenant {{ $labels.tenant_id }} is using {{ $value }} CPU cores"
+
+      - alert: HighMemoryUsage
+        expr: sum(aether_memory_usage_bytes) by (tenant_id) / 1024 / 1024 / 1024 > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage for tenant"
+          description: "Tenant {{ $labels.tenant_id }} is using {{ $value }}GB of memory"
+
+  - name: aether_scheduler
+    interval: 30s
+    rules:
+      - alert: HighSchedulingErrorRate
+        expr: rate(aether_scheduling_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High scheduling error rate"
+          description: "Scheduling error rate is {{ $value }} errors/sec (reason: {{ $labels.reason }})"
+
+  - name: aether_costs
+    interval: 1h
+    rules:
+      - alert: UnexpectedCostSpike
+        expr: rate(aether_resource_cost_total[1h]) > 10
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unexpected cost spike detected"
+          description: "Cost rate is ${{ $value }}/hour for tenant {{ $labels.tenant_id }}"

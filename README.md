@@ -28,10 +28,18 @@ Aether is a production-grade runtime for AI agents, providing secure isolation, 
 - ✅ **Redis state persistence** with distributed locking and sessions
 - ✅ **Defense in depth** security architecture
 
+### Phase 4 (Complete)
+- ✅ **Distributed tracing** with OpenTelemetry and Jaeger
+- ✅ **Prometheus metrics** with comprehensive instrumentation
+- ✅ **Grafana dashboards** for real-time system visualization
+- ✅ **Cost tracking** with per-tenant resource attribution
+- ✅ **Behavioral monitoring** with anomaly detection and automated responses
+- ✅ **Centralized logging** with Loki integration
+
 ### Coming Soon
-- 🔄 **Full observability** with OpenTelemetry and distributed tracing (Phase 4)
 - 🔄 **Event-driven messaging** via Kafka (Phase 5)
 - 🔄 **Rate limiting** with token bucket algorithm (Phase 5)
+- 🔄 **Agent recovery** with checkpointing and automatic restart (Phase 5)
 - 🔄 **High availability** and disaster recovery (Phase 6)
 
 ## Status
@@ -39,6 +47,7 @@ Aether is a production-grade runtime for AI agents, providing secure isolation, 
 ✅ **Phase 1 Complete** - Foundation (VM lifecycle, basic runtime)
 ✅ **Phase 2 Complete** - Orchestration (scheduler, auto-scaling, HTTP API, auth)
 ✅ **Phase 3 Complete** - Security (network isolation, secrets, audit logs, state persistence)
+✅ **Phase 4 Complete** - Observability (distributed tracing, metrics, cost tracking, behavioral monitoring)
 
 ## Architecture
 
@@ -49,7 +58,7 @@ Aether uses Firecracker microVMs to provide lightweight, secure isolation for AI
 - **Runtime** - VM lifecycle and resource management with Firecracker microVMs
 - **Scheduler** - Intelligent agent placement with bin-packing, spread, and best-fit strategies
 - **Security** - Network isolation, Vault secrets, audit logging, API key management, state persistence
-- **Observability** - Structured logging with slog (distributed tracing coming in Phase 4)
+- **Observability** - Distributed tracing (OpenTelemetry/Jaeger), Prometheus metrics, Grafana dashboards, cost tracking, behavioral monitoring
 
 ## Getting Started
 

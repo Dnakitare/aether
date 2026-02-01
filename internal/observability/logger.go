@@ -76,10 +76,10 @@ func Setup(ctx context.Context, cfg Config) (*slog.Logger, func(), error) {
 		})
 	}
 
-	// For Phase 1, we're using basic slog
-	// Full OpenTelemetry integration will be added in Phase 4
+	// Create logger with base handler
+	// Note: For Phase 4, we use basic slog. The otelslog bridge will be
+	// integrated when we have a full tracer provider setup.
 	logger := slog.New(baseHandler)
-	cleanup := func() {}
 
 	// Add service metadata to all logs
 	logger = logger.With(
@@ -87,6 +87,9 @@ func Setup(ctx context.Context, cfg Config) (*slog.Logger, func(), error) {
 		"version", cfg.ServiceVersion,
 		"environment", cfg.Environment,
 	)
+
+	// Cleanup function (will be extended with tracer shutdown)
+	cleanup := func() {}
 
 	return logger, cleanup, nil
 }
