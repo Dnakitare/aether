@@ -6,16 +6,31 @@ Aether is a production-grade runtime for AI agents, providing secure isolation, 
 
 ## Features
 
-- **Firecracker microVMs** for hardware-level isolation
-- **Multi-tenant** architecture with resource quotas
-- **Auto-scaling** based on workload metrics
-- **Full observability** with OpenTelemetry, Prometheus, and distributed tracing
-- **Event-driven** agent communication via Kafka
-- **Production-ready** security with secrets management and audit logging
+### Phase 1 (Complete)
+- ✅ **Firecracker microVMs** for hardware-level isolation
+- ✅ **Agent lifecycle** management (create, start, stop, destroy)
+- ✅ **Structured logging** with slog
+- ✅ **CLI interface** for agent management
+
+### Phase 2 (Complete)
+- ✅ **Intelligent scheduler** with bin-packing, spread, and best-fit strategies
+- ✅ **Auto-scaling** with policy-based rules and cooldown periods
+- ✅ **Resource quotas** with tier-based limits (free, pro, enterprise)
+- ✅ **HTTP REST API** with OpenAPI specification
+- ✅ **JWT authentication** with role-based access control (RBAC)
+- ✅ **Resource reservations** with TTL-based expiry
+
+### Coming Soon
+- 🔄 **Multi-tenant isolation** with network separation (Phase 3)
+- 🔄 **Secrets management** with HashiCorp Vault (Phase 3)
+- 🔄 **Full observability** with OpenTelemetry and distributed tracing (Phase 4)
+- 🔄 **Event-driven messaging** via Kafka (Phase 5)
+- 🔄 **High availability** and disaster recovery (Phase 6)
 
 ## Status
 
-🚧 **Currently in development** - Phase 1: Foundation
+✅ **Phase 1 Complete** - Foundation (VM lifecycle, basic runtime)
+✅ **Phase 2 Complete** - Orchestration (scheduler, auto-scaling, HTTP API, auth)
 
 ## Architecture
 
