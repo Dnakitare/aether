@@ -171,7 +171,6 @@ func (pp *PrewarmingPool) AcquireVM(ctx context.Context, workloadType WorkloadTy
 	}
 
 	pool.mu.Lock()
-	defer pool.mu.Unlock()
 
 	// Try to get a VM from available pool
 	if len(pool.available) > 0 {
@@ -182,11 +181,22 @@ func (pp *PrewarmingPool) AcquireVM(ctx context.Context, workloadType WorkloadTy
 		vm.InUse = true
 		vm.LastUsed = time.Now()
 
+		// Capture metrics data while holding lock
+		inUseSize := len(pool.inUse)
+		availableSize := len(pool.available)
+		refillThreshold := int(float64(pp.config.PoolSize[workloadType]) * pp.config.RefillThreshold)
+		needsRefill := availableSize < refillThreshold
+
+		pool.mu.Unlock()
+
+		// Update metrics after releasing lock to avoid deadlock
 		pp.updateMetrics(workloadType, func(m *PoolMetrics) {
 			m.TotalAcquired++
-			m.InUseSize = len(pool.inUse)
-			m.AvailableSize = len(pool.available)
-			m.HitRate = float64(m.TotalAcquired) / float64(m.TotalAcquired+m.TotalCreated)
+			m.InUseSize = inUseSize
+			m.AvailableSize = availableSize
+			if m.TotalAcquired+m.TotalCreated > 0 {
+				m.HitRate = float64(m.TotalAcquired) / float64(m.TotalAcquired+m.TotalCreated)
+			}
 			m.AvgWaitTime = time.Since(start)
 		})
 
@@ -197,8 +207,7 @@ func (pp *PrewarmingPool) AcquireVM(ctx context.Context, workloadType WorkloadTy
 		)
 
 		// Trigger refill if below threshold
-		refillThreshold := int(float64(pp.config.PoolSize[workloadType]) * pp.config.RefillThreshold)
-		if len(pool.available) < refillThreshold {
+		if needsRefill {
 			go pp.refillPool(ctx, workloadType)
 		}
 
@@ -210,17 +219,25 @@ func (pp *PrewarmingPool) AcquireVM(ctx context.Context, workloadType WorkloadTy
 		"workload_type", workloadType,
 	)
 
+	// Release pool lock before creating new VM (which may take time)
+	pool.mu.Unlock()
+
 	vm, err := pp.createVMSync(ctx, workloadType)
 	if err != nil {
 		return nil, err
 	}
 
+	// Re-acquire lock to update pool
+	pool.mu.Lock()
 	pool.inUse[vm.ID] = vm
 	vm.InUse = true
+	inUseSize := len(pool.inUse)
+	pool.mu.Unlock()
 
+	// Update metrics after releasing lock
 	pp.updateMetrics(workloadType, func(m *PoolMetrics) {
 		m.TotalCreated++
-		m.InUseSize = len(pool.inUse)
+		m.InUseSize = inUseSize
 		m.AvgWaitTime = time.Since(start)
 	})
 
@@ -230,8 +247,6 @@ func (pp *PrewarmingPool) AcquireVM(ctx context.Context, workloadType WorkloadTy
 // ReleaseVM returns a VM to the pool
 func (pp *PrewarmingPool) ReleaseVM(ctx context.Context, vmID string) error {
 	pp.mu.RLock()
-	defer pp.mu.RUnlock()
-
 	// Find which pool this VM belongs to
 	for workloadType, pool := range pp.pools {
 		pool.mu.Lock()
@@ -247,13 +262,19 @@ func (pp *PrewarmingPool) ReleaseVM(ctx context.Context, vmID string) error {
 				pool.available = append(pool.available, vm)
 			}
 
-			pp.updateMetrics(workloadType, func(m *PoolMetrics) {
-				m.TotalReleased++
-				m.InUseSize = len(pool.inUse)
-				m.AvailableSize = len(pool.available)
-			})
+			// Capture metrics data while holding locks
+			inUseSize := len(pool.inUse)
+			availableSize := len(pool.available)
 
 			pool.mu.Unlock()
+			pp.mu.RUnlock()
+
+			// Update metrics after releasing locks to avoid deadlock
+			pp.updateMetrics(workloadType, func(m *PoolMetrics) {
+				m.TotalReleased++
+				m.InUseSize = inUseSize
+				m.AvailableSize = availableSize
+			})
 
 			pp.logger.Info("released VM to pool",
 				"vm_id", vmID,
@@ -264,6 +285,7 @@ func (pp *PrewarmingPool) ReleaseVM(ctx context.Context, vmID string) error {
 		}
 		pool.mu.Unlock()
 	}
+	pp.mu.RUnlock()
 
 	return fmt.Errorf("VM not found: %s", vmID)
 }
@@ -406,7 +428,14 @@ func (pp *PrewarmingPool) cleanupExpiredVMs(ctx context.Context) {
 // removeExpiredVMs removes VMs that have been idle too long
 func (pp *PrewarmingPool) removeExpiredVMs() {
 	pp.mu.RLock()
-	defer pp.mu.RUnlock()
+
+	// Collect updates for each workload type
+	type metricsUpdate struct {
+		workloadType  WorkloadType
+		expired       int
+		availableSize int
+	}
+	var updates []metricsUpdate
 
 	for workloadType, pool := range pp.pools {
 		pool.mu.Lock()
@@ -430,14 +459,25 @@ func (pp *PrewarmingPool) removeExpiredVMs() {
 		pool.available = kept
 
 		if expired > 0 {
-			pp.updateMetrics(workloadType, func(m *PoolMetrics) {
-				m.TotalExpired += int64(expired)
-				m.CurrentSize -= expired
-				m.AvailableSize = len(pool.available)
+			updates = append(updates, metricsUpdate{
+				workloadType:  workloadType,
+				expired:       expired,
+				availableSize: len(pool.available),
 			})
 		}
 
 		pool.mu.Unlock()
+	}
+
+	pp.mu.RUnlock()
+
+	// Update metrics after releasing locks to avoid deadlock
+	for _, update := range updates {
+		pp.updateMetrics(update.workloadType, func(m *PoolMetrics) {
+			m.TotalExpired += int64(update.expired)
+			m.CurrentSize -= update.expired
+			m.AvailableSize = update.availableSize
+		})
 	}
 }
 

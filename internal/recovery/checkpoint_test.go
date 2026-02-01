@@ -1,7 +1,6 @@
 package recovery_test
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"testing"
