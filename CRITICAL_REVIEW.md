@@ -16,20 +16,21 @@ Aether demonstrates excellent architectural vision and comprehensive feature imp
 | Category | Critical | High | Medium | Low | Total |
 |----------|----------|------|--------|-----|-------|
 | **Security** | 5 | 5 | 5 | 0 | 15 |
-| **Code Quality** | 3 | 8 | 10 | 5 | 26 |
+| **Code Quality** | 4 | 8 | 10 | 5 | 27 |
 | **Architecture** | 8 | 6 | 14 | 0 | 28 |
-| **TOTAL** | **16** | **19** | **29** | **5** | **69** |
+| **TOTAL** | **17** | **19** | **29** | **5** | **70** |
 
 ### Critical Blockers (Must Fix Before Any Deployment)
 
-1. **SQL Injection** - Multiple vulnerabilities in backup/restore
-2. **Command Injection** - Network device creation vulnerable
-3. **No Authentication** - All API endpoints are open
-4. **Hardcoded Credentials** - Passwords in version control
-5. **Resource Leaks** - File handles, goroutines not properly cleaned
-6. **Race Conditions** - Quota manager allows over-allocation
-7. **Distributed State** - In-memory maps cannot scale
-8. **Missing Migrations** - Schema-as-code prevents safe upgrades
+1. **Lock Upgrade Deadlock** - Prewarming pool freezes indefinitely (FIXED)
+2. **SQL Injection** - Multiple vulnerabilities in backup/restore
+3. **Command Injection** - Network device creation vulnerable
+4. **No Authentication** - All API endpoints are open
+5. **Hardcoded Credentials** - Passwords in version control
+6. **Resource Leaks** - File handles, goroutines not properly cleaned
+7. **Race Conditions** - Quota manager allows over-allocation
+8. **Distributed State** - In-memory maps cannot scale
+9. **Missing Migrations** - Schema-as-code prevents safe upgrades
 
 **Estimated Time to Production Ready**: 4-6 weeks for critical fixes, 3-4 months for complete hardening
 
@@ -361,7 +362,72 @@ func generateID(prefix string) string {
 
 ### 🚨 CRITICAL CODE QUALITY
 
-#### 1. File Handle Leak in VM Lifecycle
+#### 1. Lock Upgrade Deadlock in Prewarming Pool ✅ FIXED
+**File**: `internal/optimization/prewarming.go:230-269` (ReleaseVM, AcquireVM, removeExpiredVMs)
+**Severity**: CRITICAL
+**Status**: Fixed in commit 78a0e8a
+
+```go
+// DEADLOCK CODE (before fix)
+func (pp *PrewarmingPool) ReleaseVM(ctx context.Context, vmID string) error {
+    pp.mu.RLock()         // 1. Acquire read lock on global pool
+    defer pp.mu.RUnlock()
+
+    for workloadType, pool := range pp.pools {
+        pool.mu.Lock()    // 2. Acquire write lock on specific pool
+
+        // ... update pool state ...
+
+        pp.updateMetrics(workloadType, func(m *PoolMetrics) {
+            // 3. updateMetrics tries pp.mu.Lock() - DEADLOCK!
+            //    Cannot upgrade from RLock to Lock in Go
+        })
+
+        pool.mu.Unlock()
+    }
+}
+```
+
+**Impact**:
+- TestAcquireReleaseVM timed out after 10 minutes
+- Production deployment would freeze indefinitely on VM release
+- All VM operations blocked waiting for lock
+- Complete system failure requiring restart
+
+**Root Cause**: Lock upgrade violation - goroutine holds `pp.mu.RLock()` (read lock) and tries to acquire `pp.mu.Lock()` (write lock) via `updateMetrics()`. This is impossible in Go and causes permanent deadlock.
+
+**Fix Applied**:
+```go
+func (pp *PrewarmingPool) ReleaseVM(ctx context.Context, vmID string) error {
+    pp.mu.RLock()
+
+    for workloadType, pool := range pp.pools {
+        pool.mu.Lock()
+
+        // Capture metric values while holding locks
+        inUseSize := len(pool.inUse)
+        availableSize := len(pool.available)
+
+        pool.mu.Unlock()
+        pp.mu.RUnlock()  // ← Release locks BEFORE updateMetrics
+
+        // Update metrics with captured values - safe, no locks held
+        pp.updateMetrics(workloadType, func(m *PoolMetrics) {
+            m.TotalReleased++
+            m.InUseSize = inUseSize
+            m.AvailableSize = availableSize
+        })
+
+        return nil
+    }
+}
+```
+
+**Verification**: Tests now pass in 0.50s (was timing out after 10m)
+
+---
+
+#### 2. File Handle Leak in VM Lifecycle
 **File**: `internal/runtime/vm/lifecycle.go:119-125`
 **Severity**: CRITICAL
 
@@ -396,7 +462,7 @@ cmd.Stderr = logFile
 
 ---
 
-#### 2. Goroutine Leak in Log Streaming
+#### 3. Goroutine Leak in Log Streaming
 **File**: `internal/runtime/agent/logs.go:58-62`
 **Severity**: CRITICAL
 
@@ -424,7 +490,7 @@ default:
 
 ---
 
-#### 3. Race Condition in Metrics Collector
+#### 4. Race Condition in Metrics Collector
 **File**: `internal/runtime/agent/metrics.go:36-46`
 **Severity**: CRITICAL
 
