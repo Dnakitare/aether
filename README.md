@@ -36,11 +36,19 @@ Aether is a production-grade runtime for AI agents, providing secure isolation, 
 - ✅ **Behavioral monitoring** with anomaly detection and automated responses
 - ✅ **Centralized logging** with Loki integration
 
+### Phase 5 (Complete)
+- ✅ **Event-driven messaging** with Kafka pub/sub and direct agent communication
+- ✅ **Rate limiting** with multi-tier, multi-layer token bucket algorithm
+- ✅ **Agent recovery** with PostgreSQL-backed checkpointing and retry strategies
+- ✅ **Network routing** with service discovery, load balancing, and circuit breakers
+- ✅ **Connection pooling** for efficient agent-to-agent communication
+- ✅ **Traffic policies** with configurable retry, timeout, and failure handling
+
 ### Coming Soon
-- 🔄 **Event-driven messaging** via Kafka (Phase 5)
-- 🔄 **Rate limiting** with token bucket algorithm (Phase 5)
-- 🔄 **Agent recovery** with checkpointing and automatic restart (Phase 5)
-- 🔄 **High availability** and disaster recovery (Phase 6)
+- 🔄 **High availability** with multi-region and leader election (Phase 6)
+- 🔄 **Disaster recovery** with automated backups and failover (Phase 6)
+- 🔄 **Kubernetes integration** with CRDs and operator pattern (Phase 6)
+- 🔄 **Multi-cloud support** with Terraform modules (Phase 6)
 
 ## Status
 
@@ -48,6 +56,7 @@ Aether is a production-grade runtime for AI agents, providing secure isolation, 
 ✅ **Phase 2 Complete** - Orchestration (scheduler, auto-scaling, HTTP API, auth)
 ✅ **Phase 3 Complete** - Security (network isolation, secrets, audit logs, state persistence)
 ✅ **Phase 4 Complete** - Observability (distributed tracing, metrics, cost tracking, behavioral monitoring)
+✅ **Phase 5 Complete** - Advanced Features (messaging, rate limiting, recovery, routing)
 
 ## Architecture
 
@@ -59,6 +68,10 @@ Aether uses Firecracker microVMs to provide lightweight, secure isolation for AI
 - **Scheduler** - Intelligent agent placement with bin-packing, spread, and best-fit strategies
 - **Security** - Network isolation, Vault secrets, audit logging, API key management, state persistence
 - **Observability** - Distributed tracing (OpenTelemetry/Jaeger), Prometheus metrics, Grafana dashboards, cost tracking, behavioral monitoring
+- **Messaging** - Event-driven communication via Kafka with pub/sub and direct messaging patterns
+- **Rate Limiting** - Multi-tier, multi-layer token bucket algorithm with Redis backend
+- **Recovery** - PostgreSQL-backed checkpointing with automatic restart and failover strategies
+- **Routing** - Service discovery, load balancing (round-robin, least connections), and circuit breakers
 
 ## Getting Started
 
