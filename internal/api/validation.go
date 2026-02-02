@@ -112,7 +112,7 @@ func ValidateImage(image string) error {
 }
 
 // ValidateResources validates resource requests.
-func ValidateResources(resources api.Resources) error {
+func ValidateResources(resources api.ResourceLimits) error {
 	// Validate CPU count
 	if resources.CPUCount < minCPUCount {
 		return fmt.Errorf("CPU count must be at least %d", minCPUCount)

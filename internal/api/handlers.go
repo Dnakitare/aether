@@ -2,6 +2,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -43,14 +44,20 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List only agents belonging to this tenant
-	filter := &api.ListOptions{
-		TenantID: tenantID,
-	}
-
-	agents, err := s.runtime.ListAgents(ctx, filter)
+	// TODO: Add filtering by tenant in runtime.ListAgents
+	// For now, we list all and filter manually
+	allAgents, err := s.runtime.ListAgents(ctx, nil)
 	if err != nil {
 		s.respondError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Filter by tenant
+	var agents []*api.AgentInfo
+	for _, agent := range allAgents {
+		if agent.Config.TenantID == tenantID {
+			agents = append(agents, agent)
+		}
 	}
 
 	s.respondJSON(w, http.StatusOK, agents)

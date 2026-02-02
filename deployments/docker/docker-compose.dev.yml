@@ -8,9 +8,11 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    env_file:
+      - ../../.env.dev
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -18,10 +20,12 @@ services:
   # PostgreSQL for durable storage
   postgres:
     image: postgres:16-alpine
+    env_file:
+      - ../../.env.dev
     environment:
-      POSTGRES_DB: aether
-      POSTGRES_USER: aether
-      POSTGRES_PASSWORD: aether_dev_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
