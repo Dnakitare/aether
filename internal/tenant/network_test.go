@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dnakitare/aether/internal/tenant"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/tenant"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 func TestNetworkIsolation(t *testing.T) {

@@ -11,10 +11,11 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/dnakitare/aether/internal/scaler"
-	"github.com/dnakitare/aether/internal/scheduler"
-	"github.com/dnakitare/aether/internal/tenant"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/auth"
+	"github.com/aether-runtime/aether/internal/scaler"
+	"github.com/aether-runtime/aether/internal/scheduler"
+	"github.com/aether-runtime/aether/internal/tenant"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Server is the HTTP API server.
@@ -28,6 +29,7 @@ type Server struct {
 	scheduler    *scheduler.Scheduler
 	scaler       *scaler.Scaler
 	quotaManager *tenant.QuotaManager
+	jwtManager   *auth.JWTManager
 
 	// Configuration
 	config Config
@@ -46,10 +48,13 @@ type Config struct {
 
 	// EnableCORS enables CORS headers
 	EnableCORS bool
+
+	// EnableAuth enables JWT authentication (should be true in production)
+	EnableAuth bool
 }
 
 // New creates a new HTTP API server.
-func New(logger *slog.Logger, config Config, runtime api.Runtime, sched *scheduler.Scheduler, sc *scaler.Scaler, qm *tenant.QuotaManager) *Server {
+func New(logger *slog.Logger, config Config, runtime api.Runtime, sched *scheduler.Scheduler, sc *scaler.Scaler, qm *tenant.QuotaManager, jwtMgr *auth.JWTManager) *Server {
 	if config.ReadTimeout == 0 {
 		config.ReadTimeout = 15 * time.Second
 	}
@@ -64,6 +69,7 @@ func New(logger *slog.Logger, config Config, runtime api.Runtime, sched *schedul
 		scheduler:    sched,
 		scaler:       sc,
 		quotaManager: qm,
+		jwtManager:   jwtMgr,
 		config:       config,
 	}
 
@@ -114,19 +120,24 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // setupRoutes configures all API routes.
 func (s *Server) setupRoutes() {
-	// Middleware
+	// Global middleware (applied to all routes)
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.recoveryMiddleware)
 	if s.config.EnableCORS {
 		s.router.Use(s.corsMiddleware)
 	}
 
-	// Health check
+	// Health checks (unauthenticated)
 	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")
 	s.router.HandleFunc("/readiness", s.handleReadiness).Methods("GET")
 
-	// API v1
+	// API v1 (authenticated)
 	v1 := s.router.PathPrefix("/v1").Subrouter()
+
+	// Apply authentication middleware to all v1 routes if enabled
+	if s.config.EnableAuth {
+		v1.Use(s.authMiddleware)
+	}
 
 	// Agents
 	v1.HandleFunc("/agents", s.handleListAgents).Methods("GET")

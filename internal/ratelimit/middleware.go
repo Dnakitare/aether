@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Middleware creates an HTTP middleware for rate limiting.

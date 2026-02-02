@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dnakitare/aether/internal/optimization"
+	"github.com/aether-runtime/aether/internal/optimization"
 )
 
 func TestPrewarmingConfig(t *testing.T) {

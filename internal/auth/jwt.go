@@ -8,7 +8,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Claims represents JWT claims.

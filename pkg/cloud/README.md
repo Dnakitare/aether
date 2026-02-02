@@ -21,7 +21,7 @@ Unified interface for S3, Cloud Storage, and Azure Blob Storage.
 
 **AWS S3:**
 ```go
-import "github.com/dnakitare/aether/pkg/cloud/aws"
+import "github.com/aether-runtime/aether/pkg/cloud/aws"
 
 config := cloud.StorageConfig{
     Provider: cloud.ProviderAWS,
@@ -53,7 +53,7 @@ for _, obj := range objects {
 
 **GCP Cloud Storage:**
 ```go
-import "github.com/dnakitare/aether/pkg/cloud/gcp"
+import "github.com/aether-runtime/aether/pkg/cloud/gcp"
 
 config := cloud.StorageConfig{
     Provider:  cloud.ProviderGCP,
@@ -142,7 +142,7 @@ _, err := s3Client.PutObject(ctx, &s3.PutObjectInput{
 
 **After:**
 ```go
-import "github.com/dnakitare/aether/pkg/cloud/aws"
+import "github.com/aether-runtime/aether/pkg/cloud/aws"
 
 storage, _ := aws.NewS3Storage(config)
 err := storage.PutObject(ctx, bucket, key, data, nil)

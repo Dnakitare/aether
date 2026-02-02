@@ -251,9 +251,15 @@ func (rm *RestoreManager) ValidateRestore(ctx context.Context) error {
 		// Check tables exist
 		tables := []string{"agents", "tenants", "audit_logs", "checkpoints"}
 		for _, table := range tables {
+			// Validate table name against whitelist
+			if !allowedTables[table] {
+				return fmt.Errorf("invalid table name: %s (not in whitelist)", table)
+			}
+
 			var exists bool
-			query := fmt.Sprintf("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '%s')", table)
-			if err := rm.db.QueryRowContext(ctx, query).Scan(&exists); err != nil {
+			// Use parameterized query to prevent SQL injection
+			query := "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)"
+			if err := rm.db.QueryRowContext(ctx, query, table).Scan(&exists); err != nil {
 				return fmt.Errorf("failed to check table %s: %w", table, err)
 			}
 			if !exists {

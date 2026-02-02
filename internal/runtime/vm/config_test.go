@@ -3,8 +3,8 @@ package vm_test
 import (
 	"testing"
 
-	"github.com/dnakitare/aether/internal/runtime/vm"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/runtime/vm"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 func TestFromAgentConfig(t *testing.T) {

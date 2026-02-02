@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dnakitare/aether/internal/backup"
+	"github.com/aether-runtime/aether/internal/backup"
 )
 
 func TestBackupConfig(t *testing.T) {

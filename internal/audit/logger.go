@@ -11,7 +11,7 @@ import (
 
 	_ "github.com/lib/pq"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Logger provides audit logging to PostgreSQL.

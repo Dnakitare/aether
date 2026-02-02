@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // SimpleMetricsProvider is a basic in-memory metrics provider for testing.

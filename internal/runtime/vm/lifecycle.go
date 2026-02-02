@@ -8,9 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"syscall"
 	"time"
 )
+
+// deviceNameRegex validates network device names to prevent command injection.
+// Allows alphanumeric characters and hyphens, max 15 characters (Linux IFNAMSIZ limit).
+var deviceNameRegex = regexp.MustCompile(`^[a-zA-Z0-9-]{1,15}$`)
 
 // Manager manages Firecracker VM lifecycle.
 type Manager struct {
@@ -253,10 +258,15 @@ func (v *VM) writeFirecrackerConfig(path string) error {
 
 // createTapDevice creates a tap network device.
 func (m *Manager) createTapDevice(ctx context.Context, name string) error {
+	// Validate device name to prevent command injection
+	if !deviceNameRegex.MatchString(name) {
+		return fmt.Errorf("invalid device name '%s': must be alphanumeric with hyphens, max 15 characters", name)
+	}
+
 	m.logger.InfoContext(ctx, "creating tap device", "device", name)
 
 	// On Linux, use ip tuntap
-	// This is a placeholder - actual implementation depends on OS
+	// Device name is validated above, safe to use in command
 	cmd := exec.CommandContext(ctx, "ip", "tuntap", "add", "dev", name, "mode", "tap")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create tap device: %w", err)
@@ -265,6 +275,8 @@ func (m *Manager) createTapDevice(ctx context.Context, name string) error {
 	// Bring the interface up
 	cmd = exec.CommandContext(ctx, "ip", "link", "set", name, "up")
 	if err := cmd.Run(); err != nil {
+		// Clean up the tap device we just created
+		_ = m.deleteTapDevice(ctx, name)
 		return fmt.Errorf("failed to bring up tap device: %w", err)
 	}
 
@@ -273,8 +285,14 @@ func (m *Manager) createTapDevice(ctx context.Context, name string) error {
 
 // deleteTapDevice removes a tap network device.
 func (m *Manager) deleteTapDevice(ctx context.Context, name string) error {
+	// Validate device name to prevent command injection
+	if !deviceNameRegex.MatchString(name) {
+		return fmt.Errorf("invalid device name '%s': must be alphanumeric with hyphens, max 15 characters", name)
+	}
+
 	m.logger.InfoContext(ctx, "deleting tap device", "device", name)
 
+	// Device name is validated above, safe to use in command
 	cmd := exec.CommandContext(ctx, "ip", "tuntap", "del", "dev", name, "mode", "tap")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to delete tap device: %w", err)

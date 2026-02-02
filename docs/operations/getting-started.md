@@ -33,7 +33,7 @@ Use WSL2 with Linux kernel 5.10+. See [WSL2 setup guide](wsl2-setup.md).
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/dnakitare/aether.git
+git clone https://github.com/aether-runtime/aether.git
 cd aether
 ```
 
@@ -295,7 +295,7 @@ go mod verify
 
 ## Getting Help
 
-- **GitHub Issues**: https://github.com/dnakitare/aether/issues
+- **GitHub Issues**: https://github.com/aether-runtime/aether/issues
 - **Documentation**: `/docs` directory
 - **Examples**: `/examples` directory (coming in Phase 2)
 

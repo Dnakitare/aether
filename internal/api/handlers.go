@@ -7,9 +7,10 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/dnakitare/aether/internal/scaler"
-	"github.com/dnakitare/aether/internal/tenant"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/auth"
+	"github.com/aether-runtime/aether/internal/scaler"
+	"github.com/aether-runtime/aether/internal/tenant"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Health check handlers
@@ -34,9 +35,19 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// TODO: Extract tenant ID from auth context
-	// For now, list all agents
-	agents, err := s.runtime.ListAgents(ctx, nil)
+	// Extract tenant ID from auth context
+	tenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
+	// List only agents belonging to this tenant
+	filter := &api.ListOptions{
+		TenantID: tenantID,
+	}
+
+	agents, err := s.runtime.ListAgents(ctx, filter)
 	if err != nil {
 		s.respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -54,13 +65,9 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate request
-	if req.Name == "" {
-		s.respondError(w, http.StatusBadRequest, "agent name is required")
-		return
-	}
-	if req.Image == "" {
-		s.respondError(w, http.StatusBadRequest, "agent image is required")
+	// Validate agent configuration using validation framework
+	if err := ValidateAgentConfig(req); err != nil {
+		s.respondError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
 		return
 	}
 
@@ -69,11 +76,26 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		req.ID = api.AgentID(generateID("agent"))
 	}
 
-	// Set default tenant if not provided
-	if req.TenantID == "" {
-		// TODO: Extract from auth context
-		req.TenantID = api.TenantID("default")
+	// Extract tenant ID from auth context and enforce it
+	tenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
 	}
+
+	// If tenant ID is provided in request, verify it matches auth context
+	if req.TenantID != "" && req.TenantID != tenantID {
+		s.logger.WarnContext(ctx, "tenant ID mismatch in create request",
+			"auth_tenant", tenantID,
+			"request_tenant", req.TenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "cannot create agent for different tenant")
+		return
+	}
+
+	// Set tenant ID from auth context
+	req.TenantID = tenantID
 
 	// Check quota
 	if s.quotaManager != nil {
@@ -123,9 +145,28 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	agentID := api.AgentID(vars["id"])
 
+	// Extract tenant ID from auth context
+	tenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
 	info, err := s.runtime.GetAgent(ctx, agentID)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	// Verify tenant ownership
+	if info.Config.TenantID != tenantID {
+		s.logger.WarnContext(ctx, "tenant isolation violation attempt",
+			"requested_agent", agentID,
+			"agent_tenant", info.Config.TenantID,
+			"requester_tenant", tenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
 
@@ -137,10 +178,29 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	agentID := api.AgentID(vars["id"])
 
+	// Extract tenant ID from auth context
+	tenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
 	// Get agent info for resource cleanup
 	info, err := s.runtime.GetAgent(ctx, agentID)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	// Verify tenant ownership
+	if info.Config.TenantID != tenantID {
+		s.logger.WarnContext(ctx, "tenant isolation violation attempt on delete",
+			"requested_agent", agentID,
+			"agent_tenant", info.Config.TenantID,
+			"requester_tenant", tenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "access denied")
 		return
 	}
 
@@ -172,6 +232,31 @@ func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	agentID := api.AgentID(vars["id"])
 
+	// Extract tenant ID from auth context
+	tenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
+	// Verify tenant ownership
+	info, err := s.runtime.GetAgent(ctx, agentID)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if info.Config.TenantID != tenantID {
+		s.logger.WarnContext(ctx, "tenant isolation violation attempt on logs",
+			"requested_agent", agentID,
+			"agent_tenant", info.Config.TenantID,
+			"requester_tenant", tenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
 	follow := r.URL.Query().Get("follow") == "true"
 
 	reader, err := s.runtime.GetAgentLogs(ctx, agentID, follow)
@@ -194,6 +279,31 @@ func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	agentID := api.AgentID(vars["id"])
 
+	// Extract tenant ID from auth context
+	tenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
+	// Verify tenant ownership
+	info, err := s.runtime.GetAgent(ctx, agentID)
+	if err != nil {
+		s.respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if info.Config.TenantID != tenantID {
+		s.logger.WarnContext(ctx, "tenant isolation violation attempt on health check",
+			"requested_agent", agentID,
+			"agent_tenant", info.Config.TenantID,
+			"requester_tenant", tenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
 	health, err := s.runtime.GetAgentHealth(ctx, agentID)
 	if err != nil {
 		s.respondError(w, http.StatusInternalServerError, err.Error())
@@ -206,8 +316,23 @@ func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {
 // Quota handlers
 
 func (s *Server) handleListQuotas(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if s.quotaManager == nil {
 		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
+		return
+	}
+
+	// Extract claims from auth context
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		return
+	}
+
+	// Only admins can list all quotas
+	if !auth.IsAdmin(claims) {
+		s.respondError(w, http.StatusForbidden, "admin access required")
 		return
 	}
 
@@ -216,15 +341,41 @@ func (s *Server) handleListQuotas(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if s.quotaManager == nil {
 		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
 		return
 	}
 
 	vars := mux.Vars(r)
-	tenantID := api.TenantID(vars["tenant_id"])
+	requestedTenantID := api.TenantID(vars["tenant_id"])
 
-	quota, err := s.quotaManager.GetQuota(tenantID)
+	// Extract tenant ID from auth context
+	authTenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
+	// Tenants can only view their own quota unless they're an admin
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		return
+	}
+
+	if requestedTenantID != authTenantID && !auth.IsAdmin(claims) {
+		s.logger.WarnContext(ctx, "tenant isolation violation on quota access",
+			"requested_tenant", requestedTenantID,
+			"auth_tenant", authTenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	quota, err := s.quotaManager.GetQuota(requestedTenantID)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, err.Error())
 		return
@@ -234,8 +385,22 @@ func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if s.quotaManager == nil {
 		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
+		return
+	}
+
+	// Only admins can set quotas
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		return
+	}
+
+	if !auth.IsAdmin(claims) {
+		s.respondError(w, http.StatusForbidden, "admin access required to set quotas")
 		return
 	}
 
@@ -259,15 +424,41 @@ func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	if s.quotaManager == nil {
 		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
 		return
 	}
 
 	vars := mux.Vars(r)
-	tenantID := api.TenantID(vars["tenant_id"])
+	requestedTenantID := api.TenantID(vars["tenant_id"])
 
-	usage, err := s.quotaManager.GetUsage(tenantID)
+	// Extract tenant ID from auth context
+	authTenantID, err := auth.GetTenantID(ctx)
+	if err != nil {
+		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		return
+	}
+
+	// Tenants can only view their own usage unless they're an admin
+	claims, ok := auth.GetClaims(ctx)
+	if !ok {
+		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		return
+	}
+
+	if requestedTenantID != authTenantID && !auth.IsAdmin(claims) {
+		s.logger.WarnContext(ctx, "tenant isolation violation on usage access",
+			"requested_tenant", requestedTenantID,
+			"auth_tenant", authTenantID,
+			"remote_addr", r.RemoteAddr,
+		)
+		s.respondError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	usage, err := s.quotaManager.GetUsage(requestedTenantID)
 	if err != nil {
 		s.respondError(w, http.StatusNotFound, err.Error())
 		return

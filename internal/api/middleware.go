@@ -4,7 +4,10 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/aether-runtime/aether/internal/auth"
 )
 
 // loggingMiddleware logs HTTP requests.
@@ -65,11 +68,60 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// authMiddleware validates authentication (placeholder for Phase 5).
+// authMiddleware validates JWT authentication on all endpoints except health/metrics.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement JWT validation in Phase 5
-		next.ServeHTTP(w, r)
+		// Skip authentication for health and metrics endpoints
+		if r.URL.Path == "/health" || r.URL.Path == "/readiness" || r.URL.Path == "/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Extract Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			s.logger.WarnContext(r.Context(), "missing authorization header",
+				"path", r.URL.Path,
+				"remote_addr", r.RemoteAddr,
+			)
+			s.respondError(w, http.StatusUnauthorized, "missing authorization header")
+			return
+		}
+
+		// Extract Bearer token
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			s.logger.WarnContext(r.Context(), "invalid authorization format",
+				"path", r.URL.Path,
+				"remote_addr", r.RemoteAddr,
+			)
+			s.respondError(w, http.StatusUnauthorized, "invalid authorization format, expected 'Bearer <token>'")
+			return
+		}
+
+		// Validate token
+		claims, err := s.jwtManager.ValidateToken(tokenString)
+		if err != nil {
+			s.logger.WarnContext(r.Context(), "invalid token",
+				"error", err,
+				"path", r.URL.Path,
+				"remote_addr", r.RemoteAddr,
+			)
+			s.respondError(w, http.StatusUnauthorized, "invalid or expired token")
+			return
+		}
+
+		// Add claims to context for handlers
+		ctx := auth.WithClaims(r.Context(), claims)
+
+		s.logger.DebugContext(ctx, "authenticated request",
+			"tenant_id", claims.TenantID,
+			"user_id", claims.UserID,
+			"role", claims.Role,
+			"path", r.URL.Path,
+		)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

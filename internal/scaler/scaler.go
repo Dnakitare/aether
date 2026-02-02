@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Scaler manages automatic scaling of agents based on metrics.

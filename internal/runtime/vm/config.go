@@ -2,7 +2,7 @@
 package vm
 
 import (
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // VMConfig defines the configuration for a Firecracker microVM.

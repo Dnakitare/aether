@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dnakitare/aether/internal/routing"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/routing"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 func TestRouterConfig(t *testing.T) {

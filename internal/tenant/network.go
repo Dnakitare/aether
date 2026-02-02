@@ -8,7 +8,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // NetworkIsolationManager manages network isolation for tenants.

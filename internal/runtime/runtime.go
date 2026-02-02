@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dnakitare/aether/internal/runtime/agent"
-	"github.com/dnakitare/aether/internal/runtime/vm"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/runtime/agent"
+	"github.com/aether-runtime/aether/internal/runtime/vm"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Runtime is the main Aether runtime that manages agent lifecycle.

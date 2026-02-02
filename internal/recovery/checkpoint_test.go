@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dnakitare/aether/internal/recovery"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/recovery"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 func TestCheckpointConfig(t *testing.T) {

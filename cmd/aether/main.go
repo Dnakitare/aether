@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dnakitare/aether/internal/observability"
-	"github.com/dnakitare/aether/internal/runtime"
-	"github.com/dnakitare/aether/internal/runtime/vm"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/observability"
+	"github.com/aether-runtime/aether/internal/runtime"
+	"github.com/aether-runtime/aether/internal/runtime/vm"
+	"github.com/aether-runtime/aether/pkg/api"
 	"github.com/spf13/cobra"
 )
 

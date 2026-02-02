@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dnakitare/aether/internal/observability"
+	"github.com/aether-runtime/aether/internal/observability"
 )
 
 func TestSetup(t *testing.T) {

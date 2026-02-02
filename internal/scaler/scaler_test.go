@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dnakitare/aether/internal/scaler"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/scaler"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 func TestScaler(t *testing.T) {

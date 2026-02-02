@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // BehaviorMonitor tracks agent behavior patterns and detects anomalies.

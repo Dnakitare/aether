@@ -467,8 +467,8 @@ psql -h localhost -U aether -d aether
 
 ```go
 import (
-    "github.com/dnakitare/aether/internal/messaging"
-    "github.com/dnakitare/aether/pkg/api"
+    "github.com/aether-runtime/aether/internal/messaging"
+    "github.com/aether-runtime/aether/pkg/api"
 )
 
 // Setup
@@ -557,7 +557,7 @@ dm.ReceiveMessages(ctx, "worker-1", handler)
 
 ```go
 import (
-    "github.com/dnakitare/aether/internal/ratelimit"
+    "github.com/aether-runtime/aether/internal/ratelimit"
 )
 
 // Setup
@@ -606,7 +606,7 @@ limiter := ratelimit.NewMultiLayerLimiter(logger, redisClient, customLimits)
 
 ```go
 import (
-    "github.com/dnakitare/aether/internal/recovery"
+    "github.com/aether-runtime/aether/internal/recovery"
 )
 
 // Setup
@@ -677,7 +677,7 @@ if err := riskyOperation(); err != nil {
 
 ```go
 import (
-    "github.com/dnakitare/aether/internal/routing"
+    "github.com/aether-runtime/aether/internal/routing"
 )
 
 // Setup

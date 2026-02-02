@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dnakitare/aether/internal/auth"
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/auth"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 func TestJWTManager(t *testing.T) {

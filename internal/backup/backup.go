@@ -11,7 +11,17 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/lib/pq"
 )
+
+// allowedTables is a whitelist of tables that can be backed up
+var allowedTables = map[string]bool{
+	"agents":      true,
+	"tenants":     true,
+	"audit_logs":  true,
+	"checkpoints": true,
+	"quotas":      true,
+}
 
 // BackupManager manages backup operations
 type BackupManager struct {
@@ -190,22 +200,30 @@ func (bm *BackupManager) backupPostgres(ctx context.Context, path string) (int64
 
 // getTableSchema gets the schema for a table
 func (bm *BackupManager) getTableSchema(ctx context.Context, table string) (string, error) {
+	// Validate table name against whitelist to prevent SQL injection
+	if !allowedTables[table] {
+		return "", fmt.Errorf("invalid table name: %s (not in whitelist)", table)
+	}
+
 	// Simplified schema extraction - in production use pg_dump
 	return fmt.Sprintf("-- Schema for table: %s\n-- (Use pg_dump for actual schema)", table), nil
 }
 
 // getTableData gets the data for a table
 func (bm *BackupManager) getTableData(ctx context.Context, table string) (string, error) {
-	// Simplified data extraction - in production use COPY or pg_dump
-	rows, err := bm.db.QueryContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", table))
-	if err != nil {
-		return "", err
+	// Validate table name against whitelist to prevent SQL injection
+	if !allowedTables[table] {
+		return "", fmt.Errorf("invalid table name: %s (not in whitelist)", table)
 	}
-	defer rows.Close()
 
-	var count int
-	if rows.Next() {
-		rows.Scan(&count)
+	// Use parameterized query with quoted identifier for safety
+	// Note: pq.QuoteIdentifier properly escapes table names
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", pq.QuoteIdentifier(table))
+
+	var count int64
+	err := bm.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		return "", fmt.Errorf("failed to query table %s: %w", table, err)
 	}
 
 	return fmt.Sprintf("-- Data for table: %s (rows: %d)\n-- (Use pg_dump for actual data)", table, count), nil

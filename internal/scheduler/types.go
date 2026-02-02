@@ -4,7 +4,7 @@ package scheduler
 import (
 	"time"
 
-	"github.com/dnakitare/aether/pkg/api"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
 // Node represents a compute node that can host agents.
