@@ -41,6 +41,9 @@ type TracerConfig struct {
 
 	// UseStdout exports traces to stdout instead of OTLP (for development)
 	UseStdout bool
+
+	// UseTLS enables TLS for OTLP gRPC connection (recommended for production)
+	UseTLS bool
 }
 
 // TracerProvider wraps OpenTelemetry tracer provider.
@@ -89,12 +92,18 @@ func NewTracerProvider(logger *slog.Logger, config TracerConfig) (*TracerProvide
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		clientOptions := []otlptracegrpc.Option{
+			otlptracegrpc.WithEndpoint(config.Endpoint),
+		}
+
+		// Use TLS for production environments
+		if !config.UseTLS {
+			clientOptions = append(clientOptions, otlptracegrpc.WithInsecure())
+		}
+
 		exporter, err = otlptrace.New(
 			ctx,
-			otlptracegrpc.NewClient(
-				otlptracegrpc.WithEndpoint(config.Endpoint),
-				otlptracegrpc.WithInsecure(), // TODO: Use TLS in production
-			),
+			otlptracegrpc.NewClient(clientOptions...),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)

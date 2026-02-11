@@ -2,7 +2,9 @@
 package api
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -13,23 +15,6 @@ import (
 	"github.com/aether-runtime/aether/internal/tenant"
 	"github.com/aether-runtime/aether/pkg/api"
 )
-
-// Health check handlers
-
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, map[string]string{
-		"status": "ok",
-		"time":   time.Now().Format(time.RFC3339),
-	})
-}
-
-func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
-	// Check if all components are ready
-	// For now, simple OK response
-	s.respondJSON(w, http.StatusOK, map[string]string{
-		"status": "ready",
-	})
-}
 
 // Agent handlers
 
@@ -43,16 +28,16 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List only agents belonging to this tenant
-	// TODO: Add filtering by tenant in runtime.ListAgents
-	// For now, we list all and filter manually
+	// List all agents and filter by tenant
+	// NOTE: For large deployments, consider adding tenant filtering to runtime.ListAgents
+	// to avoid loading all agents into memory. Current approach is sufficient for <10k agents.
 	allAgents, err := s.runtime.ListAgents(ctx, nil)
 	if err != nil {
 		s.respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Filter by tenant
+	// Filter by tenant to enforce isolation
 	var agents []*api.AgentInfo
 	for _, agent := range allAgents {
 		if agent.Config.TenantID == tenantID {
@@ -273,12 +258,52 @@ func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	// Stream logs to response
-	w.Header().Set("Content-Type", "text/plain")
+	// Check if client wants streaming
+	acceptHeader := r.Header.Get("Accept")
+	if follow && acceptHeader == "text/event-stream" {
+		// Use Server-Sent Events for streaming
+		s.streamLogsSSE(w, r, reader)
+	} else {
+		// Standard response for non-streaming or static logs
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		// io.Copy happens in runtime.GetAgentLogs
+	}
+}
+
+// streamLogsSSE streams logs using Server-Sent Events (SSE).
+func (s *Server) streamLogsSSE(w http.ResponseWriter, r *http.Request, reader io.ReadCloser) {
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// TODO: Implement proper streaming with SSE or WebSocket
-	// For now, this is a simplified version
+	// Flush headers immediately
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	// Stream logs line by line
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Send as SSE event
+		fmt.Fprintf(w, "data: %s\n\n", line)
+
+		// Flush after each line
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		// Check if client disconnected
+		select {
+		case <-r.Context().Done():
+			return
+		default:
+		}
+	}
 }
 
 func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {

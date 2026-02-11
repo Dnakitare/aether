@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,8 +11,49 @@ import (
 	"github.com/aether-runtime/aether/pkg/api"
 )
 
+// TenantTierProvider is an interface for looking up tenant tiers.
+// Implementations can query databases, caches, or use static configuration.
+type TenantTierProvider interface {
+	GetTenantTier(ctx context.Context, tenantID api.TenantID) (Tier, error)
+}
+
+// StaticTierProvider returns a fixed tier for all tenants.
+type StaticTierProvider struct {
+	tier Tier
+}
+
+// NewStaticTierProvider creates a provider that returns the same tier for all tenants.
+func NewStaticTierProvider(tier Tier) *StaticTierProvider {
+	return &StaticTierProvider{tier: tier}
+}
+
+// GetTenantTier returns the static tier.
+func (p *StaticTierProvider) GetTenantTier(ctx context.Context, tenantID api.TenantID) (Tier, error) {
+	return p.tier, nil
+}
+
+// MiddlewareConfig holds configuration for rate limit middleware.
+type MiddlewareConfig struct {
+	Logger       *slog.Logger
+	Limiter      *MultiLayerLimiter
+	TierProvider TenantTierProvider // Optional: If nil, uses default free tier
+}
+
 // Middleware creates an HTTP middleware for rate limiting.
 func Middleware(logger *slog.Logger, limiter *MultiLayerLimiter) func(http.Handler) http.Handler {
+	return MiddlewareWithConfig(MiddlewareConfig{
+		Logger:       logger,
+		Limiter:      limiter,
+		TierProvider: NewStaticTierProvider(TierFree),
+	})
+}
+
+// MiddlewareWithConfig creates an HTTP middleware with custom configuration.
+func MiddlewareWithConfig(config MiddlewareConfig) func(http.Handler) http.Handler {
+	if config.TierProvider == nil {
+		config.TierProvider = NewStaticTierProvider(TierFree)
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -27,13 +69,18 @@ func Middleware(logger *slog.Logger, limiter *MultiLayerLimiter) func(http.Handl
 			// Extract user ID from context or header
 			userID := extractUserID(r)
 
-			// Get tenant tier (default to free if not found)
-			tier := getTenantTier(tenantID)
+			// Get tenant tier from provider
+			tier, err := config.TierProvider.GetTenantTier(ctx, tenantID)
+			if err != nil {
+				config.Logger.WarnContext(ctx, "failed to get tenant tier, using free tier",
+					"tenant_id", tenantID, "error", err)
+				tier = TierFree
+			}
 
 			// Check rate limits
-			result, err := limiter.CheckLimits(ctx, tenantID, userID, r.URL.Path, tier)
+			result, err := config.Limiter.CheckLimits(ctx, tenantID, userID, r.URL.Path, tier)
 			if err != nil {
-				logger.ErrorContext(ctx, "rate limit check failed", "error", err)
+				config.Logger.ErrorContext(ctx, "rate limit check failed", "error", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
 			}
@@ -93,14 +140,31 @@ func extractUserID(r *http.Request) string {
 	return ""
 }
 
-// getTenantTier returns the tier for a tenant.
-// In production, this would query the database.
-// For now, we return a default tier.
-func getTenantTier(tenantID api.TenantID) Tier {
-	// TODO: Look up tenant tier from database
-	// For now, default to free tier
-	return TierFree
-}
+// Example database-backed tier provider implementation:
+//
+// type DatabaseTierProvider struct {
+//     db *sql.DB
+//     cache *cache.Cache // Optional: cache to reduce database load
+// }
+//
+// func (p *DatabaseTierProvider) GetTenantTier(ctx context.Context, tenantID api.TenantID) (Tier, error) {
+//     // Check cache first
+//     if cached, found := p.cache.Get(string(tenantID)); found {
+//         return cached.(Tier), nil
+//     }
+//
+//     // Query database
+//     var tierStr string
+//     err := p.db.QueryRowContext(ctx,
+//         "SELECT tier FROM tenants WHERE id = $1", tenantID).Scan(&tierStr)
+//     if err != nil {
+//         return TierFree, fmt.Errorf("failed to query tenant tier: %w", err)
+//     }
+//
+//     tier := parseTier(tierStr)
+//     p.cache.Set(string(tenantID), tier, 5*time.Minute)
+//     return tier, nil
+// }
 
 // RateLimitInfo holds rate limit information for responses.
 type RateLimitInfo struct {

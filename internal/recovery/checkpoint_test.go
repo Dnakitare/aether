@@ -71,7 +71,8 @@ func TestCheckpointManager(t *testing.T) {
 	_ = logger
 	_ = config
 
-	// TODO: Add full integration tests with test database
+	// Note: Full integration tests with PostgreSQL are in internal/backup/backup_comprehensive_test.go
+	// and tests/integration/backup_restore_integration_test.go
 }
 
 func TestCheckpoint(t *testing.T) {

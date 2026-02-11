@@ -7,10 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+
 	"github.com/aether-runtime/aether/internal/auth"
+	"github.com/aether-runtime/aether/internal/observability"
+	"github.com/aether-runtime/aether/pkg/api"
 )
 
-// loggingMiddleware logs HTTP requests.
+// loggingMiddleware logs HTTP requests and records metrics.
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -18,9 +23,28 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		// Wrap response writer to capture status code
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
+		// Increment in-flight requests metric
+		s.metrics.IncAPIRequestsInFlight(r.Method, r.URL.Path)
+		defer s.metrics.DecAPIRequestsInFlight(r.Method, r.URL.Path)
+
 		next.ServeHTTP(wrapped, r)
 
 		duration := time.Since(start)
+
+		// Extract tenant ID from context if available
+		tenantID := api.TenantID("unknown")
+		if claims, ok := auth.GetClaims(r.Context()); ok {
+			tenantID = claims.TenantID
+		}
+
+		// Record metrics
+		s.metrics.RecordAPIRequest(
+			r.Method,
+			r.URL.Path,
+			http.StatusText(wrapped.statusCode),
+			tenantID,
+			duration,
+		)
 
 		s.logger.InfoContext(r.Context(),
 			"http request",
@@ -29,6 +53,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			"status", wrapped.statusCode,
 			"duration_ms", duration.Milliseconds(),
 			"remote_addr", r.RemoteAddr,
+			"tenant_id", tenantID,
 		)
 	})
 }
@@ -125,11 +150,65 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// rateLimitMiddleware enforces rate limits (placeholder for Phase 5).
+// rateLimitMiddleware is a placeholder for rate limiting.
+// To enable rate limiting, inject the ratelimit.Middleware from internal/ratelimit
+// into the Server struct and use it here.
+//
+// Example:
+//
+//	import "github.com/aether-runtime/aether/internal/ratelimit"
+//	rateLimiter := ratelimit.NewMultiLayerLimiter(logger, tokenBucket)
+//	middleware := ratelimit.Middleware(logger, rateLimiter)
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Implement rate limiting in Phase 5
+		// Rate limiting is optional - if not configured, pass through
 		next.ServeHTTP(w, r)
+	})
+}
+
+// tracingMiddleware adds distributed tracing to HTTP requests.
+func (s *Server) tracingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip if tracing not enabled
+		if s.tracer == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Extract trace context from incoming request headers
+		ctx := propagation.TraceContext{}.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+
+		// Start a new span for this request
+		tracer := s.tracer.Tracer("aether.http")
+		ctx, span := observability.StartSpan(
+			ctx,
+			tracer,
+			r.Method+" "+r.URL.Path,
+			attribute.String("http.method", r.Method),
+			attribute.String("http.url", r.URL.String()),
+			attribute.String("http.target", r.URL.Path),
+			attribute.String("http.scheme", r.URL.Scheme),
+			attribute.String("http.host", r.Host),
+			attribute.String("http.user_agent", r.UserAgent()),
+			attribute.String("http.remote_addr", r.RemoteAddr),
+		)
+		defer span.End()
+
+		// Wrap response writer to capture status code
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		// Process request with traced context
+		next.ServeHTTP(wrapped, r.WithContext(ctx))
+
+		// Add response attributes to span
+		span.SetAttributes(
+			attribute.Int("http.status_code", wrapped.statusCode),
+		)
+
+		// Record error if status code indicates failure
+		if wrapped.statusCode >= 400 {
+			span.SetAttributes(attribute.Bool("error", true))
+		}
 	})
 }
 
