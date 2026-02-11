@@ -4,7 +4,7 @@
 
 [![Build Status](https://img.shields.io/github/workflow/status/dnakitare/aether/CI)](https://github.com/dnakitare/aether/actions)
 [![Go Version](https://img.shields.io/badge/go-1.21-blue)](https://golang.org/dl/)
-[![License](https://img.shields.io/badge/license-TBD-lightgrey)](#license)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-comprehensive-brightgreen)](docs/)
 
 Aether is a production-grade runtime for AI agents, providing secure isolation, intelligent orchestration, and comprehensive observability at scale. Built on **Firecracker microVMs**, Aether enables you to run thousands of untrusted workloads safely and efficiently.
@@ -484,9 +484,22 @@ Be respectful, inclusive, and professional. See [CODE_OF_CONDUCT.md](CODE_OF_CON
 
 ## 📜 License
 
-**TBD** - License to be determined. This project is currently closed-source but may be open-sourced in the future.
+Aether is licensed under the **Apache License 2.0**.
 
-For licensing inquiries, contact: [Your Email]
+This means you can:
+- ✅ Use it commercially
+- ✅ Modify it
+- ✅ Distribute it
+- ✅ Use it privately
+- ✅ Use patent claims from contributors
+
+You must:
+- 📄 Include the license and copyright notice
+- 📄 State significant changes made to the code
+
+See [LICENSE](LICENSE) for the full license text.
+
+**Why Apache 2.0?** We chose Apache 2.0 for its patent protection, enterprise-friendliness, and compatibility with building commercial services on top of Aether
 
 ---
 

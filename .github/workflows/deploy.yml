@@ -1,0 +1,420 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip tests (emergency deploy only)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        if: ${{ !inputs.skip_tests }}
+        run: |
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage
+        if: ${{ !inputs.skip_tests }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.txt
+          fail_ci_if_error: true
+
+      - name: Build binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -ldflags='-w -s -extldflags "-static"' \
+            -a -installsuffix cgo \
+            -o aether \
+            ./cmd/aether
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-binary
+          path: aether
+          retention-days: 1
+
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployments/docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          provenance: true
+          sbom: true
+
+      - name: Sign image
+        uses: sigstore/cosign-installer@main
+
+      - name: Sign the image with Cosign
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - name: Run Trivy scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.docker-build.outputs.image-tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [docker-build, security-scan]
+    environment:
+      name: staging
+      url: https://staging.aether.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_STAGING_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Update ECS task definition
+        run: |
+          # Get current task definition
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition aether-staging \
+            --query taskDefinition)
+
+          # Update image
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "${{ needs.docker-build.outputs.image-tag }}" \
+            '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+
+          # Register new task definition
+          NEW_REVISION=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.revision')
+
+          echo "New task definition revision: $NEW_REVISION"
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster aether-staging \
+            --service aether-api \
+            --task-definition aether-staging:$NEW_REVISION \
+            --force-new-deployment
+
+      - name: Wait for deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster aether-staging \
+            --services aether-api
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          # Add smoke test commands here
+          # Example: curl https://staging.aether.example.com/health
+
+      - name: Notify deployment
+        if: always()
+        run: |
+          echo "Staging deployment completed"
+          # Add notification logic (Slack, email, etc.)
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [docker-build, deploy-staging]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production
+      url: https://aether.example.com
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PRODUCTION_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Create deployment backup
+        run: |
+          # Backup current task definition
+          aws ecs describe-task-definition \
+            --task-definition aether-production \
+            --query taskDefinition \
+            > /tmp/backup-task-def-$(date +%Y%m%d-%H%M%S).json
+
+          # Backup to S3
+          aws s3 cp /tmp/backup-task-def-*.json \
+            s3://aether-backups/deployments/
+
+      - name: Update ECS task definition
+        id: update-task-def
+        run: |
+          # Get current task definition
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition aether-production \
+            --query taskDefinition)
+
+          # Store old image for rollback
+          OLD_IMAGE=$(echo $TASK_DEF | jq -r '.containerDefinitions[0].image')
+          echo "old-image=$OLD_IMAGE" >> $GITHUB_OUTPUT
+
+          # Update image
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "${{ needs.docker-build.outputs.image-tag }}" \
+            '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+
+          # Register new task definition
+          NEW_REVISION=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.revision')
+
+          echo "new-revision=$NEW_REVISION" >> $GITHUB_OUTPUT
+          echo "New task definition revision: $NEW_REVISION"
+
+      - name: Deploy to ECS (Blue/Green)
+        id: deploy
+        run: |
+          # Update service with new task definition
+          aws ecs update-service \
+            --cluster aether-production \
+            --service aether-api \
+            --task-definition aether-production:${{ steps.update-task-def.outputs.new-revision }} \
+            --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
+            --force-new-deployment
+
+      - name: Wait for deployment
+        timeout-minutes: 15
+        run: |
+          aws ecs wait services-stable \
+            --cluster aether-production \
+            --services aether-api
+
+      - name: Run health checks
+        timeout-minutes: 5
+        run: |
+          echo "Running production health checks..."
+
+          # Health check
+          for i in {1..10}; do
+            if curl -f https://aether.example.com/health; then
+              echo "Health check passed"
+              break
+            else
+              echo "Health check failed, retrying in 5s..."
+              sleep 5
+            fi
+          done
+
+          # Readiness check
+          if ! curl -f https://aether.example.com/readiness; then
+            echo "Readiness check failed!"
+            exit 1
+          fi
+
+      - name: Run smoke tests
+        timeout-minutes: 5
+        run: |
+          echo "Running production smoke tests..."
+          # Add smoke test commands here
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "Production deployment succeeded"
+          # Add success notification (Slack, PagerDuty, etc.)
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deployment failed, rolling back..."
+
+          # Get previous task definition revision
+          PREVIOUS_REVISION=$(aws ecs describe-services \
+            --cluster aether-production \
+            --services aether-api \
+            --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition' \
+            --output text | sed 's/.*://')
+
+          # Rollback to previous revision
+          aws ecs update-service \
+            --cluster aether-production \
+            --service aether-api \
+            --task-definition aether-production:$((PREVIOUS_REVISION - 1)) \
+            --force-new-deployment
+
+          # Wait for rollback
+          aws ecs wait services-stable \
+            --cluster aether-production \
+            --services aether-api
+
+          echo "Rollback completed"
+
+      - name: Notify deployment failure
+        if: failure()
+        run: |
+          echo "Production deployment failed and rolled back"
+          # Add failure notification (PagerDuty, Slack, etc.)
+
+  deploy-database-migrations:
+    name: Run Database Migrations
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: production-migrations
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PRODUCTION_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Get database credentials
+        run: |
+          # Get credentials from Secrets Manager
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id aether-production/postgres/master \
+            --query SecretString \
+            --output text)
+
+          echo "DATABASE_URL=$(echo $DB_SECRET | jq -r '.connection_string')" >> $GITHUB_ENV
+
+      - name: Backup database
+        run: |
+          echo "Creating database backup before migration..."
+          # Add database backup command
+
+      - name: Run migrations
+        run: |
+          # Download migration tool
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.16.2/migrate.linux-amd64.tar.gz | tar xvz
+
+          # Run migrations
+          ./migrate -path migrations \
+            -database "$DATABASE_URL" \
+            up
+
+      - name: Verify migrations
+        run: |
+          # Check migration version
+          ./migrate -path migrations \
+            -database "$DATABASE_URL" \
+            version
+
+  notify-deployment:
+    name: Notify Deployment Complete
+    runs-on: ubuntu-latest
+    needs: [deploy-production, deploy-database-migrations]
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          echo "Deployment pipeline completed"
+          echo "Build: ${{ needs.build.result }}"
+          echo "Docker: ${{ needs.docker-build.result }}"
+          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Production: ${{ needs.deploy-production.result }}"
+          echo "Migrations: ${{ needs.deploy-database-migrations.result }}"
+
+          # Add notification logic (Slack, email, etc.)

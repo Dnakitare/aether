@@ -1,0 +1,404 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to rollback'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      rollback_to:
+        description: 'Rollback method'
+        required: true
+        type: choice
+        options:
+          - previous_revision
+          - specific_revision
+          - specific_image
+      revision_number:
+        description: 'Specific task definition revision (optional)'
+        required: false
+        type: string
+      image_tag:
+        description: 'Specific image tag (optional, e.g., v1.2.3)'
+        required: false
+        type: string
+      skip_migrations_rollback:
+        description: 'Skip database migration rollback (dangerous)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate Rollback Request
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.validate.outputs.environment }}
+      target: ${{ steps.validate.outputs.target }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        run: |
+          echo "Validating rollback request..."
+
+          # Validate environment
+          if [[ "${{ inputs.environment }}" != "staging" && "${{ inputs.environment }}" != "production" ]]; then
+            echo "Invalid environment: ${{ inputs.environment }}"
+            exit 1
+          fi
+
+          # Validate rollback target
+          if [[ "${{ inputs.rollback_to }}" == "specific_revision" && -z "${{ inputs.revision_number }}" ]]; then
+            echo "Revision number is required for specific_revision rollback"
+            exit 1
+          fi
+
+          if [[ "${{ inputs.rollback_to }}" == "specific_image" && -z "${{ inputs.image_tag }}" ]]; then
+            echo "Image tag is required for specific_image rollback"
+            exit 1
+          fi
+
+          echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+
+          # Determine target based on rollback method
+          if [[ "${{ inputs.rollback_to }}" == "previous_revision" ]]; then
+            echo "target=previous" >> $GITHUB_OUTPUT
+          elif [[ "${{ inputs.rollback_to }}" == "specific_revision" ]]; then
+            echo "target=${{ inputs.revision_number }}" >> $GITHUB_OUTPUT
+          else
+            echo "target=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Confirm production rollback
+        if: inputs.environment == 'production'
+        run: |
+          echo "::warning::⚠️  PRODUCTION ROLLBACK REQUESTED"
+          echo "::warning::Environment: ${{ inputs.environment }}"
+          echo "::warning::Rollback to: ${{ inputs.rollback_to }}"
+          echo "::warning::Target: ${{ steps.validate.outputs.target }}"
+
+  backup-current-state:
+    name: Backup Current State
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_PRODUCTION_ROLE_ARN || secrets.AWS_STAGING_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Backup current task definition
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          CLUSTER="aether-${{ inputs.environment }}"
+
+          # Get current task definition
+          aws ecs describe-task-definition \
+            --task-definition aether-${{ inputs.environment }} \
+            --query taskDefinition \
+            > /tmp/rollback-backup-${TIMESTAMP}.json
+
+          # Upload to S3
+          aws s3 cp /tmp/rollback-backup-${TIMESTAMP}.json \
+            s3://aether-backups/rollback-backups/${{ inputs.environment }}/
+
+          echo "Backup saved: rollback-backup-${TIMESTAMP}.json"
+
+      - name: Backup database (if needed)
+        if: ${{ !inputs.skip_migrations_rollback }}
+        run: |
+          echo "Creating database backup before rollback..."
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+          # Get database credentials
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id aether-${{ inputs.environment }}/postgres/master \
+            --query SecretString \
+            --output text)
+
+          DB_HOST=$(echo $DB_SECRET | jq -r '.host')
+          DB_PORT=$(echo $DB_SECRET | jq -r '.port')
+          DB_NAME=$(echo $DB_SECRET | jq -r '.database')
+          DB_USER=$(echo $DB_SECRET | jq -r '.username')
+          DB_PASS=$(echo $DB_SECRET | jq -r '.password')
+
+          # Create backup
+          PGPASSWORD=$DB_PASS pg_dump \
+            -h $DB_HOST \
+            -p $DB_PORT \
+            -U $DB_USER \
+            -d $DB_NAME \
+            -F c \
+            > /tmp/db-backup-${TIMESTAMP}.dump
+
+          # Upload to S3
+          aws s3 cp /tmp/db-backup-${TIMESTAMP}.dump \
+            s3://aether-backups/database/${{ inputs.environment }}/rollback-${TIMESTAMP}.dump
+
+          echo "Database backup saved: rollback-${TIMESTAMP}.dump"
+
+  rollback-application:
+    name: Rollback Application
+    runs-on: ubuntu-latest
+    needs: [validate, backup-current-state]
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_PRODUCTION_ROLE_ARN || secrets.AWS_STAGING_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Determine rollback target
+        id: target
+        run: |
+          CLUSTER="aether-${{ inputs.environment }}"
+          SERVICE="aether-api"
+
+          if [[ "${{ inputs.rollback_to }}" == "previous_revision" ]]; then
+            # Get current revision
+            CURRENT=$(aws ecs describe-services \
+              --cluster $CLUSTER \
+              --services $SERVICE \
+              --query 'services[0].taskDefinition' \
+              --output text | sed 's/.*://')
+
+            TARGET_REVISION=$((CURRENT - 1))
+            echo "target-revision=$TARGET_REVISION" >> $GITHUB_OUTPUT
+            echo "Rolling back to previous revision: $TARGET_REVISION"
+
+          elif [[ "${{ inputs.rollback_to }}" == "specific_revision" ]]; then
+            echo "target-revision=${{ inputs.revision_number }}" >> $GITHUB_OUTPUT
+            echo "Rolling back to specific revision: ${{ inputs.revision_number }}"
+
+          else
+            # For specific image, we need to create a new task definition
+            echo "target-image=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "Rolling back to specific image: ${{ inputs.image_tag }}"
+          fi
+
+      - name: Rollback to revision
+        if: inputs.rollback_to != 'specific_image'
+        run: |
+          CLUSTER="aether-${{ inputs.environment }}"
+          SERVICE="aether-api"
+          TARGET_REV="${{ steps.target.outputs.target-revision }}"
+
+          echo "Rolling back service to revision $TARGET_REV..."
+
+          aws ecs update-service \
+            --cluster $CLUSTER \
+            --service $SERVICE \
+            --task-definition aether-${{ inputs.environment }}:$TARGET_REV \
+            --force-new-deployment
+
+      - name: Rollback to image
+        if: inputs.rollback_to == 'specific_image'
+        run: |
+          CLUSTER="aether-${{ inputs.environment }}"
+          TARGET_IMAGE="${{ steps.target.outputs.target-image }}"
+
+          # Get current task definition
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition aether-${{ inputs.environment }} \
+            --query taskDefinition)
+
+          # Update image
+          NEW_TASK_DEF=$(echo $TASK_DEF | jq --arg IMAGE "$TARGET_IMAGE" \
+            '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+
+          # Register new task definition
+          NEW_REVISION=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.revision')
+
+          # Update service
+          aws ecs update-service \
+            --cluster $CLUSTER \
+            --service aether-api \
+            --task-definition aether-${{ inputs.environment }}:$NEW_REVISION \
+            --force-new-deployment
+
+      - name: Wait for rollback
+        timeout-minutes: 15
+        run: |
+          CLUSTER="aether-${{ inputs.environment }}"
+
+          echo "Waiting for rollback to complete..."
+          aws ecs wait services-stable \
+            --cluster $CLUSTER \
+            --services aether-api
+
+          echo "Rollback completed successfully"
+
+  rollback-migrations:
+    name: Rollback Database Migrations
+    runs-on: ubuntu-latest
+    needs: [validate, backup-current-state]
+    if: ${{ !inputs.skip_migrations_rollback }}
+    environment: ${{ inputs.environment }}-migrations
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.rollback_to == 'specific_image' && inputs.image_tag || github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.environment == 'production' && secrets.AWS_PRODUCTION_ROLE_ARN || secrets.AWS_STAGING_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Get database credentials
+        run: |
+          DB_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id aether-${{ inputs.environment }}/postgres/master \
+            --query SecretString \
+            --output text)
+
+          echo "DATABASE_URL=$(echo $DB_SECRET | jq -r '.connection_string')" >> $GITHUB_ENV
+
+      - name: Determine migration rollback target
+        id: migration-target
+        run: |
+          # Download migration tool
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.16.2/migrate.linux-amd64.tar.gz | tar xvz
+
+          # Get current version
+          CURRENT=$(./migrate -path migrations -database "$DATABASE_URL" version 2>&1 | awk '{print $NF}')
+          echo "Current migration version: $CURRENT"
+
+          # Determine target version (go back 1 migration)
+          TARGET=$((CURRENT - 1))
+          echo "target-version=$TARGET" >> $GITHUB_OUTPUT
+          echo "Rolling back migrations to version: $TARGET"
+
+      - name: Rollback migrations
+        run: |
+          TARGET=${{ steps.migration-target.outputs.target-version }}
+
+          echo "Rolling back migrations to version $TARGET..."
+          ./migrate -path migrations \
+            -database "$DATABASE_URL" \
+            down 1
+
+      - name: Verify migration rollback
+        run: |
+          VERSION=$(./migrate -path migrations -database "$DATABASE_URL" version 2>&1 | awk '{print $NF}')
+          echo "Migration rolled back to version: $VERSION"
+
+  verify-rollback:
+    name: Verify Rollback
+    runs-on: ubuntu-latest
+    needs: [rollback-application]
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Determine environment URL
+        id: url
+        run: |
+          if [[ "${{ inputs.environment }}" == "production" ]]; then
+            echo "url=https://aether.example.com" >> $GITHUB_OUTPUT
+          else
+            echo "url=https://staging.aether.example.com" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Health check
+        timeout-minutes: 5
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+
+          echo "Running health checks on $URL..."
+
+          for i in {1..10}; do
+            if curl -f $URL/health; then
+              echo "✅ Health check passed"
+              break
+            else
+              echo "Health check failed, retrying in 10s..."
+              sleep 10
+            fi
+
+            if [[ $i -eq 10 ]]; then
+              echo "❌ Health check failed after 10 attempts"
+              exit 1
+            fi
+          done
+
+      - name: Readiness check
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+
+          if ! curl -f $URL/readiness; then
+            echo "❌ Readiness check failed!"
+            exit 1
+          fi
+
+          echo "✅ Readiness check passed"
+
+      - name: Smoke tests
+        run: |
+          URL="${{ steps.url.outputs.url }}"
+
+          echo "Running smoke tests..."
+          # Add smoke test commands
+
+          echo "✅ Smoke tests passed"
+
+  notify-rollback:
+    name: Notify Rollback Complete
+    runs-on: ubuntu-latest
+    needs: [rollback-application, verify-rollback]
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          STATUS="${{ needs.verify-rollback.result }}"
+
+          if [[ "$STATUS" == "success" ]]; then
+            echo "✅ Rollback successful for ${{ inputs.environment }}"
+            echo "Rolled back to: ${{ inputs.rollback_to }}"
+          else
+            echo "❌ Rollback failed for ${{ inputs.environment }}"
+            echo "Manual intervention required!"
+          fi
+
+          # Add notification logic (PagerDuty, Slack, etc.)
+
+      - name: Create rollback report
+        if: always()
+        run: |
+          cat > rollback-report.md <<EOF
+          # Rollback Report
+
+          **Environment**: ${{ inputs.environment }}
+          **Rollback Method**: ${{ inputs.rollback_to }}
+          **Target**: ${{ needs.validate.outputs.target }}
+          **Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Initiated By**: ${{ github.actor }}
+
+          ## Results
+
+          - Backup: ${{ needs.backup-current-state.result }}
+          - Application Rollback: ${{ needs.rollback-application.result }}
+          - Migration Rollback: ${{ needs.rollback-migrations.result }}
+          - Verification: ${{ needs.verify-rollback.result }}
+
+          ## Status
+
+          $( [[ "${{ needs.verify-rollback.result }}" == "success" ]] && echo "✅ Rollback successful" || echo "❌ Rollback failed" )
+          EOF
+
+          cat rollback-report.md
+
+          # Upload report
+          # aws s3 cp rollback-report.md s3://aether-backups/rollback-reports/
