@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 // allowedTables is a whitelist of tables that can be backed up
