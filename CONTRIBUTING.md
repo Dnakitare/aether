@@ -1,10 +1,53 @@
 # Contributing to Aether
 
-Thank you for your interest in contributing to Aether! We welcome contributions from the community.
+Thank you for your interest in contributing to Aether! We're excited to have you join our community building a modern AI agent runtime.
 
-## Code of Conduct
+**Project Status:** Alpha v0.1.0 - Core functionality complete, Beta features in development
+
+---
+
+## 📜 Code of Conduct
 
 This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+
+**In short:** Be respectful, collaborative, and constructive. We're building something great together!
+
+---
+
+## 🚀 First Time Contributors
+
+Never contributed to open source before? Welcome! Here are some helpful resources:
+- [How to Contribute to Open Source](https://opensource.guide/how-to-contribute/)
+- [First Timers Only](https://www.firsttimersonly.com/)
+- [GitHub Flow Guide](https://docs.github.com/en/get-started/quickstart/github-flow)
+
+### Good First Issues
+
+Look for issues labeled `good first issue` - these are specifically chosen for newcomers:
+- [Good First Issues](https://github.com/Dnakitare/aether/labels/good%20first%20issue)
+- These issues have clear descriptions and limited scope
+- Maintainers will provide extra guidance on these issues
+
+### Priority Areas for Contributions
+
+🔴 **High Priority** (Beta v0.2.0 focus):
+- **Observability**: OpenTelemetry tracing, Prometheus metrics, Grafana dashboards
+- **Performance**: Load testing, optimization, profiling
+- **Testing**: Increase coverage to 60%+, add chaos tests
+- **Bug Fixes**: Any and all bug fixes welcome
+
+🟡 **Medium Priority**:
+- **CLI Enhancements**: Improve user experience, add commands
+- **Documentation**: Tutorials, guides, API docs
+- **Examples**: Sample applications, integration examples
+- **Deployment**: Terraform modules, Helm charts
+
+🟢 **Low Priority**:
+- **Code Quality**: Refactoring, cleanup
+- **Additional Tests**: Edge cases, integration tests
+- **Minor Features**: Nice-to-have enhancements
+
+---
 
 ## How to Contribute
 
@@ -49,37 +92,83 @@ Feature suggestions are welcome! Please:
 ### Getting Started
 
 ```bash
-# Clone your fork
+# 1. Fork the repository on GitHub
+# Click "Fork" at https://github.com/Dnakitare/aether
+
+# 2. Clone your fork
 git clone https://github.com/YOUR_USERNAME/aether.git
 cd aether
 
-# Install dependencies
+# 3. Add upstream remote
+git remote add upstream https://github.com/Dnakitare/aether.git
+
+# 4. Install dependencies
 go mod download
 
-# Build
-make build
+# 5. Build
+go build -o aether ./cmd/aether
 
-# Run tests
-make test
+# 6. Run tests (short mode)
+go test -short ./...
 
-# Run linters
-make lint
+# 7. Run linters (if available)
+golangci-lint run
 ```
 
 ### Running Locally
 
 ```bash
-# Start dependencies (PostgreSQL, Redis, etcd, Kafka)
+# 1. Start infrastructure (PostgreSQL, Redis, etcd)
 docker-compose -f deployments/docker/docker-compose.dev.yml up -d
 
-# Run database migrations
-./aether migrate up
+# Wait for services to be ready (5-10 seconds)
+sleep 5
 
-# Start Aether server
+# 2. Set environment variables
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/aether?sslmode=disable"
+export JWT_SECRET="dev-secret-key-change-in-production"
+export SERVER_ADDRESS=":8080"
+
+# 3. Start Aether server
 ./aether server
 
-# In another terminal, test it
-./aether agent create test-agent --image python:3.11-slim
+# Server will start on http://localhost:8080
+# Logs will show: "Aether server started successfully"
+
+# 4. In another terminal, test the API
+curl http://localhost:8080/health
+
+# 5. Stop infrastructure when done
+docker-compose -f deployments/docker/docker-compose.dev.yml down
+```
+
+### Development Workflow
+
+```bash
+# Create a feature branch
+git checkout -b feature/your-feature-name
+
+# Make your changes
+# ... edit files ...
+
+# Run tests
+go test ./...
+
+# Format code
+go fmt ./...
+
+# Commit changes
+git add .
+git commit -m "feat(component): description of changes"
+
+# Keep your branch updated
+git fetch upstream
+git rebase upstream/main
+
+# Push to your fork
+git push origin feature/your-feature-name
+
+# Open a Pull Request on GitHub
 ```
 
 ## Coding Standards
@@ -92,13 +181,51 @@ docker-compose -f deployments/docker/docker-compose.dev.yml up -d
 - Keep functions under 50 lines when possible
 - Use meaningful variable names (no single letters except loops)
 
-### Testing
+### Testing Requirements
 
+**Coverage Goals:**
+- **Minimum**: 60% coverage for new code (Beta target)
+- **Current**: ~35% overall (Alpha baseline)
+- **Target**: 70%+ for critical paths
+
+**Test Types:**
+
+1. **Unit Tests** (Required for all new code)
+```bash
+# Run all unit tests
+go test -short ./...
+
+# Run with coverage
+go test -short -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
+
+2. **Integration Tests** (If modifying integration points)
+```bash
+# Start test infrastructure
+docker-compose -f docker-compose.test.yml up -d
+
+# Run integration tests
+go test ./tests/integration/...
+
+# Cleanup
+docker-compose -f docker-compose.test.yml down
+```
+
+3. **E2E Tests** (If modifying agent lifecycle)
+```bash
+# Run end-to-end tests
+go test -v ./tests/integration/e2e_workflow_test.go
+```
+
+**Testing Guidelines:**
 - Write table-driven tests where appropriate
 - Test both success and failure paths
-- Use `testify` for assertions
+- Use `testify/require` and `testify/assert`
 - Mock external dependencies (use interfaces)
-- Aim for 80%+ code coverage
+- Tests should be fast (<1s per unit test)
+- Tests should be deterministic (no flaky tests)
+- Tests should be isolated (no shared state)
 
 Example test structure:
 
@@ -231,11 +358,25 @@ For significant architectural changes, create an Architecture Decision Record (A
 2. Fill in the ADR with context, decision, and consequences
 3. Submit as part of your PR
 
-## Community
+## 👥 Community
 
-- **Discord**: [Join our Discord](https://discord.gg/aether) (TBD)
-- **GitHub Discussions**: For questions and ideas
-- **GitHub Issues**: For bugs and features
+### Get Help
+
+- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/Dnakitare/aether/discussions)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/Dnakitare/aether/issues)
+- **Documentation**: Check [docs/](docs/) for architecture and guides
+
+### Stay Updated
+
+- **Watch** the repository for notifications on new issues and PRs
+- **Star** the repository to show support and follow the project
+- **Follow** releases to get notified of new versions
+
+### Resources
+
+- **Alpha Release Notes**: [ALPHA_RELEASE_NOTES.md](ALPHA_RELEASE_NOTES.md)
+- **Architecture Docs**: [docs/architecture/](docs/architecture/)
+- **API Documentation**: Coming in Beta v0.2.0
 
 ## License
 
