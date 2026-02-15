@@ -1,0 +1,124 @@
+{
+  "dashboard": {
+    "title": "Aether - Scheduler Performance",
+    "tags": ["aether", "scheduler"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Scheduling Duration (Percentiles)",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(aether_scheduling_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50 - {{strategy}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(aether_scheduling_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95 - {{strategy}}",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(aether_scheduling_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99 - {{strategy}}",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "Duration", "logBase": 1},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Scheduling Error Rate",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(aether_scheduling_errors_total[5m])",
+            "legendFormat": "{{reason}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Errors/sec"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Scheduling Errors by Reason",
+        "type": "piechart",
+        "gridPos": {"x": 0, "y": 8, "w": 8, "h": 8},
+        "targets": [
+          {
+            "expr": "sum by(reason) (increase(aether_scheduling_errors_total[5m]))",
+            "legendFormat": "{{reason}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Scheduling Success vs Errors",
+        "type": "stat",
+        "gridPos": {"x": 8, "y": 8, "w": 8, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(aether_scheduling_duration_seconds_count[5m]))",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(aether_scheduling_errors_total[5m]))",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Scheduling Duration Heatmap",
+        "type": "heatmap",
+        "gridPos": {"x": 16, "y": 8, "w": 8, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(aether_scheduling_duration_seconds_bucket[5m])",
+            "format": "heatmap",
+            "legendFormat": "{{le}}",
+            "refId": "A"
+          }
+        ],
+        "dataFormat": "tsbuckets",
+        "yAxis": {
+          "format": "s"
+        }
+      },
+      {
+        "id": 6,
+        "title": "Scheduling by Strategy",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 24, "h": 8},
+        "targets": [
+          {
+            "expr": "rate(aether_scheduling_duration_seconds_count[5m])",
+            "legendFormat": "{{strategy}} - {{tenant_id}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "ops", "label": "Scheduling Events/sec"},
+          {"format": "short"}
+        ]
+      }
+    ]
+  }
+}
