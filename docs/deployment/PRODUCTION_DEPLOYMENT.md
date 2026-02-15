@@ -1,6 +1,23 @@
 # Production Deployment Guide
 
-Complete guide for deploying Aether in production environments.
+> **⚠️ ALPHA STATUS - INFRASTRUCTURE INCOMPLETE**
+>
+> Production deployment tooling is under active development.
+> This guide represents the **planned** deployment architecture.
+>
+> **Current State:**
+> - ✅ Basic Terraform for AWS (VPC, networking, security baseline)
+> - 🚧 Auto-scaling groups, load balancers (in development)
+> - 🚧 Complete RDS and ElastiCache setup (partial)
+> - ❌ GCP and Azure deployments (planned for Q2 2026)
+> - ❌ Kubernetes manifests (planned)
+>
+> **For production deployments:**
+> - Use at your own risk - this is pre-alpha software
+> - Expect manual configuration and troubleshooting
+> - Consider waiting for beta release (April 2026)
+>
+> **Local development:** See [Getting Started Local](../GETTING_STARTED_LOCAL.md)
 
 ---
 
