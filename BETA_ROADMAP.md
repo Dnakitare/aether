@@ -294,17 +294,20 @@
 ## 🚧 Current Progress
 
 ### Week 1: Observability Foundation
-**Status**: 🚀 Starting
+**Status**: ✅ Day 3-4 Complete (50% done)
 
 **Tasks:**
 - [x] Create Beta branch
 - [x] Create Beta roadmap
-- [ ] Add OpenTelemetry dependencies
-- [ ] Configure OTLP exporter
-- [ ] Set up Jaeger locally
-- [ ] Instrument API server
-- [ ] Instrument Runtime
-- [ ] Instrument Scheduler
+- [x] Add OpenTelemetry dependencies (already in Alpha)
+- [x] Configure OTLP exporter (already in Alpha)
+- [x] Set up Jaeger locally (added to docker-compose.dev.yml)
+- [x] Instrument API server (already in Alpha - HTTP middleware)
+- [x] Instrument Runtime (CreateAgent operation)
+- [x] Instrument Scheduler (ScheduleAgent, scheduleNext operations)
+- [ ] Test trace propagation end-to-end
+- [ ] Add trace IDs to structured logs
+- [ ] Write observability documentation
 
 ---
 
