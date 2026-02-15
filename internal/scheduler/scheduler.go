@@ -16,11 +16,18 @@ import (
 	"github.com/aether-runtime/aether/pkg/api"
 )
 
+// MetricsRecorder defines the interface for recording scheduler metrics.
+type MetricsRecorder interface {
+	RecordSchedulingDuration(strategy string, tenantID api.TenantID, duration time.Duration)
+	RecordSchedulingError(reason string, tenantID api.TenantID)
+}
+
 // Scheduler manages agent scheduling and placement.
 type Scheduler struct {
-	logger *slog.Logger
-	tracer trace.Tracer
-	mu     sync.RWMutex
+	logger  *slog.Logger
+	tracer  trace.Tracer
+	metrics MetricsRecorder
+	mu      sync.RWMutex
 
 	// Queue for pending agent requests
 	queue *Queue
@@ -81,6 +88,11 @@ func New(logger *slog.Logger, config Config) *Scheduler {
 		stopCh:   make(chan struct{}),
 		interval: config.Interval,
 	}
+}
+
+// SetMetrics sets the metrics recorder (optional).
+func (s *Scheduler) SetMetrics(metrics MetricsRecorder) {
+	s.metrics = metrics
 }
 
 // Start begins the scheduling loop.
@@ -231,6 +243,9 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		return // Queue is empty
 	}
 
+	// Track scheduling duration
+	startTime := time.Now()
+
 	ctx, span := s.tracer.Start(ctx, "scheduler.scheduleNext",
 		trace.WithAttributes(
 			attribute.String("agent.id", string(req.Config.ID)),
@@ -256,6 +271,12 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		// No suitable node found - leave in queue and try again later
 		span.SetStatus(codes.Error, "no suitable node found")
 		span.RecordError(err)
+
+		// Record scheduling error metric
+		if s.metrics != nil {
+			s.metrics.RecordSchedulingError("no_suitable_node", req.Config.TenantID)
+			s.metrics.RecordSchedulingDuration(string(s.placer.strategy), req.Config.TenantID, time.Since(startTime))
+		}
 
 		s.logger.DebugContext(ctx,
 			"no suitable node found for agent",
@@ -284,6 +305,12 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		span.SetStatus(codes.Error, "node capacity changed")
 		span.AddEvent("node_capacity_changed")
 
+		// Record scheduling error metric
+		if s.metrics != nil {
+			s.metrics.RecordSchedulingError("node_capacity_changed", req.Config.TenantID)
+			s.metrics.RecordSchedulingDuration(string(s.placer.strategy), req.Config.TenantID, time.Since(startTime))
+		}
+
 		s.logger.DebugContext(ctx,
 			"node capacity changed, agent no longer fits",
 			"agent_id", req.Config.ID,
@@ -304,6 +331,11 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 
 	// Remove from queue (successfully scheduled)
 	s.queue.Dequeue()
+
+	// Record successful scheduling metric
+	if s.metrics != nil {
+		s.metrics.RecordSchedulingDuration(string(s.placer.strategy), req.Config.TenantID, time.Since(startTime))
+	}
 
 	span.SetAttributes(
 		attribute.Bool("success", true),
