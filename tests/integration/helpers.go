@@ -21,7 +21,9 @@ import (
 	"github.com/aether-runtime/aether/internal/ha"
 	"github.com/aether-runtime/aether/internal/ratelimit"
 	"github.com/aether-runtime/aether/internal/runtime"
+	"github.com/aether-runtime/aether/internal/runtime/vm"
 	"github.com/aether-runtime/aether/internal/scheduler"
+	"github.com/aether-runtime/aether/internal/state"
 	pkgapi "github.com/aether-runtime/aether/pkg/api"
 )
 
@@ -79,6 +81,7 @@ func SetupTestEnvironment(t *testing.T) *TestEnvironment {
 
 	// Setup core components
 	env.setupAuth()
+	env.setupRuntime()
 	env.setupScheduler()
 	env.setupRateLimit()
 
@@ -158,6 +161,64 @@ func (env *TestEnvironment) setupAuth() {
 	)
 	require.NoError(env.T, err)
 	env.APIKey = apiKey
+}
+
+// setupRuntime creates the runtime instance with state store
+func (env *TestEnvironment) setupRuntime() {
+	// Create state store if PostgreSQL is available
+	var stateStore runtime.StateStore
+	if env.DB != nil {
+		pgConfig := state.PostgresConfig{
+			DSN:             "postgres://postgres:postgres@localhost:5432/aether_test?sslmode=disable",
+			MaxOpenConns:    25,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: 5 * time.Minute,
+		}
+
+		var err error
+		stateStore, err = state.NewPostgresStore(env.Logger, pgConfig)
+		require.NoError(env.T, err)
+		env.T.Log("Runtime using PostgreSQL state store")
+	} else {
+		env.T.Log("Runtime using in-memory state (PostgreSQL unavailable)")
+	}
+
+	// Check if Firecracker is available (optional for most integration tests)
+	firecrackerBinary := "/usr/local/bin/firecracker"
+	if _, err := os.Stat(firecrackerBinary); err != nil {
+		// Try alternative location
+		firecrackerBinary = "/usr/bin/firecracker"
+		if _, err := os.Stat(firecrackerBinary); err != nil {
+			env.T.Log("Firecracker not found - VM operations will fail (this is OK for most tests)")
+			// Use a non-existent path - tests that need VMs will skip themselves
+			firecrackerBinary = "/tmp/firecracker-not-installed"
+		}
+	}
+
+	// Create runtime configuration
+	rtConfig := runtime.Config{
+		VMManagerConfig: vm.ManagerConfig{
+			FirecrackerBinary: firecrackerBinary,
+			WorkspaceDir:      env.T.TempDir(),
+			KernelImage:       "/var/lib/aether/vmlinux",
+			RootFSImage:       "/var/lib/aether/rootfs.ext4",
+		},
+		DefaultResources: pkgapi.ResourceLimits{
+			CPUCount: 1,
+			MemoryMB: 512,
+		},
+		WorkspaceDir: env.T.TempDir(),
+	}
+
+	// Try to create runtime - it may fail if Firecracker is not available
+	// This is acceptable for integration tests that don't actually start VMs
+	env.Runtime, _ = runtime.New(env.Logger, rtConfig, stateStore)
+	if env.Runtime != nil {
+		env.Cleanup = append(env.Cleanup, func() {
+			ctx := context.Background()
+			env.Runtime.Shutdown(ctx)
+		})
+	}
 }
 
 // setupScheduler creates a scheduler instance
