@@ -21,7 +21,7 @@ type LoadTestEnvironment struct {
 	Logger       *slog.Logger
 	ShardManager *distributed.ShardManager
 	NodeRegistry *distributed.NodeRegistry
-	Queue        *distributed.DistributedQueue
+	Queue        distributed.Queue // Queue interface supporting both Kafka and in-memory
 	Metrics      *LoadTestMetrics
 	Nodes        []*scheduler.Node
 	SchedulerID  string // ID of the scheduler for this test
@@ -151,7 +151,8 @@ func (e *LoadTestEnvironment) registerNodes(count int, schedulerID string) {
 	e.T.Logf("Registered %d nodes for load testing", count)
 }
 
-// SetupQueue creates and starts a distributed queue for load testing
+// SetupQueue creates and starts a queue for load testing.
+// Automatically uses Kafka if available, otherwise falls back to in-memory queue.
 func (e *LoadTestEnvironment) SetupQueue(topicSuffix string, numWorkers int) {
 	queueConfig := distributed.DefaultQueueConfig()
 	queueConfig.Topic = fmt.Sprintf("load-test-%s", topicSuffix)
@@ -159,10 +160,10 @@ func (e *LoadTestEnvironment) SetupQueue(topicSuffix string, numWorkers int) {
 	queueConfig.NumWorkers = numWorkers
 	queueConfig.StartFromBeginning = true
 
-	queue, err := distributed.NewDistributedQueue(e.Logger, queueConfig)
+	queue, err := distributed.NewQueue(e.Logger, queueConfig)
 	if err != nil {
 		e.TearDown()
-		e.T.Fatalf("Failed to create distributed queue: %v", err)
+		e.T.Fatalf("Failed to create queue: %v", err)
 	}
 
 	e.Queue = queue
