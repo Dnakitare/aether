@@ -61,6 +61,27 @@ integration-test: ## Run integration tests
 	@echo "Running integration tests..."
 	$(GOTEST) -v -race -run Integration ./tests/integration/...
 
+load-test: ## Run load tests (requires infrastructure)
+	@echo "Running load tests..."
+	$(GOTEST) -v -timeout 30m -run TestLoad ./tests/load/...
+
+load-test-1k: ## Run 1,000 agent load test
+	@echo "Running 1K agent load test..."
+	$(GOTEST) -v -timeout 10m -run TestLoad_1000Agents ./tests/load/...
+
+load-test-5k: ## Run 5,000 agent load test
+	@echo "Running 5K agent load test..."
+	$(GOTEST) -v -timeout 20m -run TestLoad_5000Agents ./tests/load/...
+
+bench: ## Run benchmark tests
+	@echo "Running benchmarks..."
+	$(GOTEST) -bench=. -benchmem -run=^$$ ./tests/load/...
+
+bench-report: ## Run benchmarks and save to file
+	@echo "Running benchmarks with report..."
+	$(GOTEST) -bench=. -benchmem -run=^$$ ./tests/load/... | tee bench-results.txt
+	@echo "Benchmark results saved to bench-results.txt"
+
 lint: ## Run linters
 	@echo "Running linters..."
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Run 'make tools' first." && exit 1)
