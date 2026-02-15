@@ -352,10 +352,26 @@
 - [x] Document performance characteristics
 - [x] Complete Week 3
 
-**Week 4: Enhanced Features - Next Steps** 🔜
-- [ ] Enhanced CLI improvements (Day 22-24)
-- [ ] Checkpoint/Restore completion (Day 25-26)
-- [ ] API improvements (Day 27-28)
+**Week 4: Enhanced Features - In Progress** 🚧
+
+**Day 22-24: Enhanced CLI** ✅
+- [x] Added progress indicators and spinners
+- [x] Implemented colored output for better readability
+- [x] Enhanced error messages with context and suggestions
+- [x] Added shell autocomplete (bash, zsh, fish, PowerShell)
+- [x] Improved table formatting for list commands
+- [x] Fixed server.go to use NewQueue with fallback
+- [x] Created CLI utility package (internal/cli)
+
+**Day 25-26: Checkpoint/Restore** (Next)
+- [ ] Complete checkpoint/restore implementation
+- [ ] Add integration tests
+- [ ] Test recovery scenarios
+
+**Day 27-28: API Improvements** (Next)
+- [ ] Streaming responses
+- [ ] Bulk operations
+- [ ] Enhanced error handling
 
 ---
 
