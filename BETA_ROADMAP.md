@@ -363,10 +363,15 @@
 - [x] Fixed server.go to use NewQueue with fallback
 - [x] Created CLI utility package (internal/cli)
 
-**Day 25-26: Checkpoint/Restore** (Next)
-- [ ] Complete checkpoint/restore implementation
-- [ ] Add integration tests
-- [ ] Test recovery scenarios
+**Day 25-26: Checkpoint/Restore** 🚧
+- [x] Added CLI commands for checkpoint operations
+  * `aether agent checkpoint create` - Create checkpoints
+  * `aether agent checkpoint list` - List checkpoints
+  * `aether agent checkpoint restore` - Restore from checkpoint
+  * `aether agent checkpoint delete` - Delete checkpoints
+- [ ] Integrate CheckpointManager with Runtime (next)
+- [ ] Add checkpoint recovery integration tests
+- [ ] Document checkpoint/restore feature
 
 **Day 27-28: API Improvements** (Next)
 - [ ] Streaming responses

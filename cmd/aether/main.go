@@ -216,6 +216,7 @@ func init() {
 	agentCmd.AddCommand(agentStopCmd)
 	agentCmd.AddCommand(agentDestroyCmd)
 	agentCmd.AddCommand(agentHealthCmd)
+	agentCmd.AddCommand(agentCheckpointCmd)
 }
 
 var (
@@ -488,5 +489,117 @@ var agentHealthCmd = &cobra.Command{
 		}
 
 		return nil
+	},
+}
+
+var agentCheckpointCmd = &cobra.Command{
+	Use:   "checkpoint",
+	Short: "Manage agent checkpoints",
+	Long:  "Create, list, restore, and manage agent state checkpoints.",
+}
+
+func init() {
+	agentCheckpointCmd.AddCommand(checkpointCreateCmd)
+	agentCheckpointCmd.AddCommand(checkpointListCmd)
+	agentCheckpointCmd.AddCommand(checkpointRestoreCmd)
+	agentCheckpointCmd.AddCommand(checkpointDeleteCmd)
+}
+
+var checkpointCreateCmd = &cobra.Command{
+	Use:   "create <agent-id>",
+	Short: "Create a checkpoint for an agent",
+	Long:  "Create a state checkpoint for the specified agent. Checkpoints can be used to restore agent state later.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+
+		cli.Info("Creating checkpoint for agent %s", agentID)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with CheckpointManager when wired into runtime
+		// For now, show what the command would do
+		fmt.Println()
+		cli.Dim("  This will create a snapshot of the agent's current state")
+		cli.Dim("  The checkpoint will be stored in PostgreSQL")
+		cli.Dim("  You can restore from this checkpoint later")
+
+		return fmt.Errorf("checkpoint creation not yet integrated with runtime")
+	},
+}
+
+var checkpointListCmd = &cobra.Command{
+	Use:   "list <agent-id>",
+	Short: "List checkpoints for an agent",
+	Long:  "List all available checkpoints for the specified agent.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+
+		cli.Info("Listing checkpoints for agent %s", agentID)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with CheckpointManager when wired into runtime
+		fmt.Println()
+		table := cli.NewTable("VERSION", "CREATED", "SIZE", "STATUS")
+		table.AddRow("1", "2026-02-15 10:00:00", "1.2 MB", "Available")
+		table.AddRow("2", "2026-02-15 11:00:00", "1.3 MB", "Available")
+		table.Print()
+
+		return fmt.Errorf("checkpoint listing not yet integrated with runtime")
+	},
+}
+
+var (
+	restoreVersion int
+)
+
+var checkpointRestoreCmd = &cobra.Command{
+	Use:   "restore <agent-id>",
+	Short: "Restore an agent from a checkpoint",
+	Long:  "Restore an agent's state from a checkpoint. By default, restores from the latest checkpoint.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+
+		versionMsg := "latest"
+		if restoreVersion > 0 {
+			versionMsg = fmt.Sprintf("version %d", restoreVersion)
+		}
+
+		cli.Info("Restoring agent %s from checkpoint %s", agentID, versionMsg)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with RecoveryManager when wired into runtime
+		fmt.Println()
+		cli.Dim("  This will restore the agent to the state from the checkpoint")
+		cli.Dim("  The agent will be stopped and restarted with the restored state")
+		cli.Dim("  Any unsaved state since the checkpoint will be lost")
+
+		return fmt.Errorf("checkpoint restore not yet integrated with runtime")
+	},
+}
+
+func init() {
+	checkpointRestoreCmd.Flags().IntVar(&restoreVersion, "version", 0, "Checkpoint version to restore (default: latest)")
+}
+
+var checkpointDeleteCmd = &cobra.Command{
+	Use:   "delete <agent-id> <version>",
+	Short: "Delete a checkpoint",
+	Long:  "Delete a specific checkpoint version for an agent.",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+		version := args[1]
+
+		cli.Warn("Deleting checkpoint version %s for agent %s", version, agentID)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with CheckpointManager when wired into runtime
+		fmt.Println()
+		cli.Dim("  This will permanently delete the specified checkpoint")
+		cli.Dim("  This action cannot be undone")
+
+		return fmt.Errorf("checkpoint deletion not yet integrated with runtime")
 	},
 }
