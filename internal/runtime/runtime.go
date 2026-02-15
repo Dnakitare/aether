@@ -29,10 +29,19 @@ type StateStore interface {
 	DeleteAgent(ctx context.Context, agentID api.AgentID) error
 }
 
+// MetricsRecorder defines the interface for recording runtime metrics.
+type MetricsRecorder interface {
+	RecordAgentOperation(operation string, status string, tenantID api.TenantID)
+	RecordAgentStartup(tenantID api.TenantID, duration time.Duration)
+	RecordAgentError(errorType string, tenantID api.TenantID)
+	SetAgentCount(status api.AgentStatus, tenantID api.TenantID, count float64)
+}
+
 // Runtime is the main Aether runtime that manages agent lifecycle.
 type Runtime struct {
 	logger     *slog.Logger
 	tracer     trace.Tracer
+	metrics    MetricsRecorder
 	vmManager  *vm.Manager
 	stateStore StateStore
 	config     Config
@@ -70,8 +79,16 @@ func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, e
 	}, nil
 }
 
+// SetMetrics sets the metrics recorder (optional).
+func (r *Runtime) SetMetrics(metrics MetricsRecorder) {
+	r.metrics = metrics
+}
+
 // CreateAgent creates a new agent with the given configuration.
 func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error {
+	// Track agent creation time for metrics
+	startTime := time.Now()
+
 	ctx, span := r.tracer.Start(ctx, "runtime.CreateAgent",
 		trace.WithAttributes(
 			attribute.String("agent.id", string(config.ID)),
@@ -107,6 +124,13 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 		err := fmt.Errorf("agent %s already exists", config.ID)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "agent already exists")
+
+		// Record error metric
+		if r.metrics != nil {
+			r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
+			r.metrics.RecordAgentError("already_exists", config.TenantID)
+		}
+
 		return err
 	}
 	r.mu.RUnlock()
@@ -129,6 +153,13 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to create VM")
+
+		// Record error metric
+		if r.metrics != nil {
+			r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
+			r.metrics.RecordAgentError("vm_creation_failed", config.TenantID)
+		}
+
 		return fmt.Errorf("failed to create VM: %w", err)
 	}
 	span.AddEvent("vm_created")
@@ -158,6 +189,13 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 			span.AddEvent("state_store_persistence_failed")
 			// Continue anyway - agent exists in memory
 		}
+	}
+
+	// Record successful agent creation metrics
+	if r.metrics != nil {
+		r.metrics.RecordAgentOperation("create", "success", config.TenantID)
+		r.metrics.RecordAgentStartup(config.TenantID, time.Since(startTime))
+		// Note: Agent count is updated by a separate goroutine that polls agent states
 	}
 
 	r.logger.InfoContext(ctx, "agent created successfully", "agent_id", config.ID)
