@@ -63,6 +63,11 @@ temp/
 coverage.txt
 coverage.html
 
+# Profiling data
+profiles/
+*.prof
+*.pprof
+
 # Terraform
 *.tfstate
 *.tfstate.*
