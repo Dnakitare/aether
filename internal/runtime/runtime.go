@@ -9,6 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/aether-runtime/aether/internal/runtime/agent"
 	"github.com/aether-runtime/aether/internal/runtime/vm"
 	"github.com/aether-runtime/aether/pkg/api"
@@ -27,6 +32,7 @@ type StateStore interface {
 // Runtime is the main Aether runtime that manages agent lifecycle.
 type Runtime struct {
 	logger     *slog.Logger
+	tracer     trace.Tracer
 	vmManager  *vm.Manager
 	stateStore StateStore
 	config     Config
@@ -56,6 +62,7 @@ func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, e
 
 	return &Runtime{
 		logger:     logger,
+		tracer:     otel.Tracer("aether.runtime"),
 		vmManager:  vmManager,
 		stateStore: stateStore,
 		config:     config,
@@ -65,6 +72,15 @@ func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, e
 
 // CreateAgent creates a new agent with the given configuration.
 func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error {
+	ctx, span := r.tracer.Start(ctx, "runtime.CreateAgent",
+		trace.WithAttributes(
+			attribute.String("agent.id", string(config.ID)),
+			attribute.String("agent.tenant_id", string(config.TenantID)),
+			attribute.String("agent.image", config.Image),
+		),
+	)
+	defer span.End()
+
 	r.logger.InfoContext(ctx, "creating agent",
 		"agent_id", config.ID,
 		"tenant_id", config.TenantID,
@@ -79,11 +95,19 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 		config.Resources.MemoryMB = r.config.DefaultResources.MemoryMB
 	}
 
+	span.SetAttributes(
+		attribute.Int("agent.cpu_count", config.Resources.CPUCount),
+		attribute.Int64("agent.memory_mb", config.Resources.MemoryMB),
+	)
+
 	// Check if agent already exists
 	r.mu.RLock()
 	if _, exists := r.agents[config.ID]; exists {
 		r.mu.RUnlock()
-		return fmt.Errorf("agent %s already exists", config.ID)
+		err := fmt.Errorf("agent %s already exists", config.ID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "agent already exists")
+		return err
 	}
 	r.mu.RUnlock()
 
@@ -100,10 +124,14 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	vmConfig := vm.FromAgentConfig(config, vmPaths)
 
 	// Create the VM
+	span.AddEvent("creating_vm")
 	vmInstance, err := r.vmManager.Create(ctx, vmConfig)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to create VM")
 		return fmt.Errorf("failed to create VM: %w", err)
 	}
+	span.AddEvent("vm_created")
 
 	// Wrap VM in adapter for agent interface
 	vmAdapter := &vmAdapter{vm: vmInstance}
@@ -116,13 +144,18 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	r.agents[config.ID] = agentInstance
 	r.mu.Unlock()
 
+	span.SetAttributes(attribute.Int("runtime.agent_count", len(r.agents)))
+
 	// Persist to state store if available
 	if r.stateStore != nil {
+		span.AddEvent("persisting_to_state_store")
 		if err := r.stateStore.CreateAgent(ctx, config); err != nil {
 			r.logger.ErrorContext(ctx, "failed to persist agent to state store",
 				"agent_id", config.ID,
 				"error", err,
 			)
+			span.RecordError(err)
+			span.AddEvent("state_store_persistence_failed")
 			// Continue anyway - agent exists in memory
 		}
 	}
