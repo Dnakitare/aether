@@ -294,7 +294,7 @@
 ## 🚧 Current Progress
 
 ### Week 1: Observability Foundation
-**Status**: ✅ Day 3-4 Complete (50% done)
+**Status**: ✅ COMPLETE (100% done)
 
 **Tasks:**
 - [x] Create Beta branch
@@ -305,9 +305,9 @@
 - [x] Instrument API server (already in Alpha - HTTP middleware)
 - [x] Instrument Runtime (CreateAgent operation)
 - [x] Instrument Scheduler (ScheduleAgent, scheduleNext operations)
-- [ ] Test trace propagation end-to-end
-- [ ] Add trace IDs to structured logs
-- [ ] Write observability documentation
+- [x] Test trace propagation end-to-end (3 comprehensive tests)
+- [x] Add trace IDs to structured logs (TraceHandler with auto-injection)
+- [x] Write observability documentation (TRACING.md with examples)
 
 ---
 
