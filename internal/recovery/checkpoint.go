@@ -99,34 +99,56 @@ func (cm *CheckpointManager) createTable() error {
 }
 
 // CreateCheckpoint creates a new checkpoint for an agent.
+// This operation is atomic: both checkpoint insertion and cleanup happen in a single transaction.
 func (cm *CheckpointManager) CreateCheckpoint(ctx context.Context, agentID api.AgentID, tenantID api.TenantID, state map[string]interface{}, metadata map[string]string) (*Checkpoint, error) {
-	// Get the latest version
-	version, err := cm.getLatestVersion(ctx, agentID)
-	if err != nil {
-		return nil, err
-	}
-	version++
-
-	// Serialize state
+	// Serialize state before transaction
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	// Check size
+	// Check size before transaction
 	size := int64(len(stateJSON))
 	if size > cm.config.MaxCheckpointSize {
 		return nil, fmt.Errorf("checkpoint size %d exceeds maximum %d", size, cm.config.MaxCheckpointSize)
 	}
 
-	// Serialize metadata
+	// Serialize metadata before transaction
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Insert checkpoint
-	query := `
+	// Begin transaction with read committed isolation for better concurrency
+	tx, err := cm.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelReadCommitted,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Acquire advisory lock based on agent_id hash to serialize checkpoint creation per agent
+	// This allows concurrent checkpoints for different agents while preventing race conditions
+	// The lock is automatically released when the transaction commits/rolls back
+	_, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire advisory lock: %w", err)
+	}
+
+	// Get the latest version for this agent (now safe due to advisory lock)
+	var maxVersion int
+	err = tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM checkpoints WHERE agent_id = $1`,
+		agentID,
+	).Scan(&maxVersion)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get max version: %w", err)
+	}
+	newVersion := maxVersion + 1
+
+	// Insert checkpoint with the new version
+	insertQuery := `
 		INSERT INTO checkpoints (agent_id, tenant_id, version, state, metadata, size, compressed)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at
@@ -135,35 +157,57 @@ func (cm *CheckpointManager) CreateCheckpoint(ctx context.Context, agentID api.A
 	var checkpoint Checkpoint
 	checkpoint.AgentID = agentID
 	checkpoint.TenantID = tenantID
-	checkpoint.Version = version
+	checkpoint.Version = newVersion
 	checkpoint.State = state
 	checkpoint.Metadata = metadata
 	checkpoint.Size = size
 
-	err = cm.db.QueryRowContext(
+	err = tx.QueryRowContext(
 		ctx,
-		query,
-		agentID,
-		tenantID,
-		version,
-		stateJSON,
-		metadataJSON,
-		size,
-		cm.config.EnableCompression,
+		insertQuery,
+		agentID,                     // $1
+		tenantID,                    // $2
+		newVersion,                  // $3
+		stateJSON,                   // $4
+		metadataJSON,                // $5
+		size,                        // $6
+		cm.config.EnableCompression, // $7
 	).Scan(&checkpoint.ID, &checkpoint.CreatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert checkpoint: %w", err)
 	}
 
+	// Cleanup old checkpoints within the same transaction (atomic with insert)
+	cleanupQuery := `
+		DELETE FROM checkpoints
+		WHERE agent_id = $1
+		AND id NOT IN (
+			SELECT id FROM checkpoints
+			WHERE agent_id = $1
+			ORDER BY version DESC
+			LIMIT $2
+		)
+	`
+
+	result, err := tx.ExecContext(ctx, cleanupQuery, agentID, cm.config.RetentionCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to cleanup old checkpoints: %w", err)
+	}
+
+	deleted, _ := result.RowsAffected()
+
+	// Commit transaction atomically
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	cm.logger.InfoContext(ctx, "checkpoint created",
 		"agent_id", agentID,
-		"version", version,
+		"version", checkpoint.Version,
 		"size", size,
+		"deleted_old", deleted,
 	)
-
-	// Cleanup old checkpoints
-	go cm.cleanupOldCheckpoints(context.Background(), agentID)
 
 	return &checkpoint, nil
 }
@@ -297,46 +341,6 @@ func (cm *CheckpointManager) DeleteCheckpoint(ctx context.Context, agentID api.A
 
 	cm.logger.InfoContext(ctx, "checkpoint deleted", "agent_id", agentID, "version", version)
 	return nil
-}
-
-func (cm *CheckpointManager) getLatestVersion(ctx context.Context, agentID api.AgentID) (int, error) {
-	query := `SELECT COALESCE(MAX(version), 0) FROM checkpoints WHERE agent_id = $1`
-
-	var version int
-	err := cm.db.QueryRowContext(ctx, query, agentID).Scan(&version)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get latest version: %w", err)
-	}
-
-	return version, nil
-}
-
-func (cm *CheckpointManager) cleanupOldCheckpoints(ctx context.Context, agentID api.AgentID) {
-	query := `
-		DELETE FROM checkpoints
-		WHERE agent_id = $1
-		AND version NOT IN (
-			SELECT version
-			FROM checkpoints
-			WHERE agent_id = $1
-			ORDER BY version DESC
-			LIMIT $2
-		)
-	`
-
-	result, err := cm.db.ExecContext(ctx, query, agentID, cm.config.RetentionCount)
-	if err != nil {
-		cm.logger.ErrorContext(ctx, "failed to cleanup old checkpoints", "error", err)
-		return
-	}
-
-	deleted, _ := result.RowsAffected()
-	if deleted > 0 {
-		cm.logger.InfoContext(ctx, "cleaned up old checkpoints",
-			"agent_id", agentID,
-			"deleted", deleted,
-		)
-	}
 }
 
 // RecoveryManager handles agent recovery from checkpoints.

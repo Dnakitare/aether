@@ -90,39 +90,39 @@ func TestRedisStore(t *testing.T) {
 		lockName := "test-lock"
 
 		// Acquire lock
-		acquired, err := store.Lock(ctx, lockName, 10*time.Second)
+		lock1, err := store.Lock(ctx, lockName, 10*time.Second)
 		if err != nil {
 			t.Fatalf("Failed to acquire lock: %v", err)
 		}
-		if !acquired {
+		if lock1 == nil {
 			t.Error("Expected to acquire lock")
 		}
 
 		// Try to acquire again (should fail)
-		acquired, err = store.Lock(ctx, lockName, 10*time.Second)
-		if err != nil {
-			t.Fatalf("Failed to try lock: %v", err)
-		}
-		if acquired {
+		lock2, err := store.TryLock(ctx, lockName, 10*time.Second)
+		if err == nil {
 			t.Error("Should not acquire lock twice")
+		}
+		if lock2 != nil {
+			t.Error("Should return nil lock on failure")
 		}
 
 		// Release lock
-		if err := store.Unlock(ctx, lockName); err != nil {
+		if err := store.Unlock(ctx, lock1); err != nil {
 			t.Fatalf("Failed to release lock: %v", err)
 		}
 
 		// Acquire again (should succeed)
-		acquired, err = store.Lock(ctx, lockName, 10*time.Second)
+		lock3, err := store.Lock(ctx, lockName, 10*time.Second)
 		if err != nil {
 			t.Fatalf("Failed to reacquire lock: %v", err)
 		}
-		if !acquired {
+		if lock3 == nil {
 			t.Error("Expected to reacquire lock after release")
 		}
 
 		// Cleanup
-		store.Unlock(ctx, lockName)
+		store.Unlock(ctx, lock3)
 	})
 
 	// Test sessions

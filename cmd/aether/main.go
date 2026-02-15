@@ -102,9 +102,9 @@ var daemonCmd = &cobra.Command{
 			WorkspaceDir: "/var/lib/aether",
 		}
 
-		// Create runtime
+		// Create runtime (without state store for simple daemon mode)
 		var err error
-		rt, err = runtime.New(logger, config)
+		rt, err = runtime.New(logger, config, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create runtime: %w", err)
 		}

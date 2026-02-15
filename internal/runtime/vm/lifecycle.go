@@ -67,6 +67,7 @@ type VM struct {
 	ID      string
 	Config  VMConfig
 	cmd     *exec.Cmd
+	logFile *os.File // Log file handle that must be closed
 	manager *Manager
 }
 
@@ -84,12 +85,27 @@ func (m *Manager) Create(ctx context.Context, config VMConfig) (*VM, error) {
 		return nil, fmt.Errorf("failed to create VM directory: %w", err)
 	}
 
+	// Track created tap devices for cleanup on error
+	var createdTapDevices []string
+	defer func() {
+		// Clean up tap devices if VM creation fails
+		if len(createdTapDevices) > 0 {
+			for _, devName := range createdTapDevices {
+				if err := m.deleteTapDevice(ctx, devName); err != nil {
+					m.logger.WarnContext(ctx, "failed to cleanup tap device after error",
+						"device", devName, "error", err)
+				}
+			}
+		}
+	}()
+
 	// Set up network interface (tap device)
 	if len(config.NetworkInterfaces) > 0 {
 		for _, netif := range config.NetworkInterfaces {
 			if err := m.createTapDevice(ctx, netif.HostDevName); err != nil {
 				return nil, fmt.Errorf("failed to create tap device: %w", err)
 			}
+			createdTapDevices = append(createdTapDevices, netif.HostDevName)
 		}
 	}
 
@@ -98,6 +114,9 @@ func (m *Manager) Create(ctx context.Context, config VMConfig) (*VM, error) {
 		Config:  config,
 		manager: m,
 	}
+
+	// Success - don't cleanup tap devices
+	createdTapDevices = nil
 
 	return vm, nil
 }
@@ -125,12 +144,18 @@ func (v *VM) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create log file: %w", err)
 		}
+		v.logFile = logFile
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
+		// Clean up log file if process failed to start
+		if v.logFile != nil {
+			v.logFile.Close()
+			v.logFile = nil
+		}
 		return fmt.Errorf("failed to start firecracker: %w", err)
 	}
 
@@ -177,6 +202,14 @@ func (v *VM) Stop(ctx context.Context, timeout time.Duration) error {
 		if err != nil {
 			v.manager.logger.WarnContext(ctx, "VM exited with error", "vm_id", v.ID, "error", err)
 		}
+	}
+
+	// Close log file handle if open
+	if v.logFile != nil {
+		if err := v.logFile.Close(); err != nil {
+			v.manager.logger.WarnContext(ctx, "failed to close log file", "vm_id", v.ID, "error", err)
+		}
+		v.logFile = nil
 	}
 
 	v.manager.logger.InfoContext(ctx, "VM stopped", "vm_id", v.ID)

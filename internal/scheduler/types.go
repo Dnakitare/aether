@@ -2,6 +2,7 @@
 package scheduler
 
 import (
+	"sync"
 	"time"
 
 	"github.com/aether-runtime/aether/pkg/api"
@@ -10,6 +11,7 @@ import (
 // Node represents a compute node that can host agents.
 // In Phase 2, this is a single node. In Phase 6, this will support multi-node.
 type Node struct {
+	mu        sync.RWMutex // Protects Allocated and Agents
 	ID        string
 	Name      string
 	Labels    map[string]string
@@ -37,6 +39,9 @@ type AgentAllocation struct {
 
 // Available returns the available resources on this node.
 func (n *Node) Available() Resources {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	return Resources{
 		CPUCores: n.Capacity.CPUCores - n.Allocated.CPUCores,
 		MemoryMB: n.Capacity.MemoryMB - n.Allocated.MemoryMB,
@@ -46,7 +51,14 @@ func (n *Node) Available() Resources {
 
 // CanFit checks if the node can accommodate the requested resources.
 func (n *Node) CanFit(req Resources) bool {
-	avail := n.Available()
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	avail := Resources{
+		CPUCores: n.Capacity.CPUCores - n.Allocated.CPUCores,
+		MemoryMB: n.Capacity.MemoryMB - n.Allocated.MemoryMB,
+		DiskMB:   n.Capacity.DiskMB - n.Allocated.DiskMB,
+	}
 	return avail.CPUCores >= req.CPUCores &&
 		avail.MemoryMB >= req.MemoryMB &&
 		avail.DiskMB >= req.DiskMB
@@ -54,6 +66,9 @@ func (n *Node) CanFit(req Resources) bool {
 
 // Allocate reserves resources on this node for an agent.
 func (n *Node) Allocate(agentID api.AgentID, tenantID api.TenantID, resources Resources) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	n.Allocated.CPUCores += resources.CPUCores
 	n.Allocated.MemoryMB += resources.MemoryMB
 	n.Allocated.DiskMB += resources.DiskMB
@@ -70,6 +85,9 @@ func (n *Node) Allocate(agentID api.AgentID, tenantID api.TenantID, resources Re
 
 // Deallocate releases resources on this node.
 func (n *Node) Deallocate(agentID api.AgentID) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	alloc, exists := n.Agents[agentID]
 	if !exists {
 		return
@@ -84,10 +102,52 @@ func (n *Node) Deallocate(agentID api.AgentID) {
 
 // UtilizationPercent returns CPU utilization as a percentage (0-100).
 func (n *Node) UtilizationPercent() float64 {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	if n.Capacity.CPUCores == 0 {
 		return 0
 	}
 	return float64(n.Allocated.CPUCores) / float64(n.Capacity.CPUCores) * 100
+}
+
+// AgentCount returns the number of agents on this node.
+func (n *Node) AgentCount() int {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	return len(n.Agents)
+}
+
+// HasAgent returns true if the node has the specified agent.
+func (n *Node) HasAgent(agentID api.AgentID) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	_, exists := n.Agents[agentID]
+	return exists
+}
+
+// AgentIDs returns a slice of agent IDs on this node.
+func (n *Node) AgentIDs() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	ids := make([]string, 0, len(n.Agents))
+	for agentID := range n.Agents {
+		ids = append(ids, string(agentID))
+	}
+	return ids
+}
+
+// RLock acquires a read lock on the node (for external serialization).
+func (n *Node) RLock() {
+	n.mu.RLock()
+}
+
+// RUnlock releases a read lock on the node (for external serialization).
+func (n *Node) RUnlock() {
+	n.mu.RUnlock()
 }
 
 // AgentRequest represents a request to schedule an agent.

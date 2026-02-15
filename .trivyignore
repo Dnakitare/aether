@@ -1,0 +1,15 @@
+# Trivy Ignore File
+#
+# Use this file to ignore specific CVEs that are false positives or accepted risks.
+# Format: One CVE ID per line
+#
+# Example:
+# CVE-2023-12345
+#
+# Always add a comment explaining why each CVE is ignored:
+# CVE-2023-12345 - False positive: Only affects Windows, we use Linux
+# CVE-2024-67890 - Accepted risk: Low severity, fix not available, mitigated by network controls
+#
+# Review this file quarterly to ensure ignored CVEs are still valid.
+
+# Add ignored CVEs below this line:

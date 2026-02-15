@@ -24,6 +24,8 @@ func TestScheduler(t *testing.T) {
 
 	s := scheduler.New(logger, config)
 
+	ctx := context.Background()
+
 	// Register a node
 	node := &scheduler.Node{
 		ID:   "node-1",
@@ -37,7 +39,7 @@ func TestScheduler(t *testing.T) {
 		Agents:    make(map[api.AgentID]*scheduler.AgentAllocation),
 	}
 
-	s.RegisterNode(node)
+	s.RegisterNode(ctx, node)
 
 	// Create an agent request
 	agentConfig := api.AgentConfig{
@@ -59,16 +61,16 @@ func TestScheduler(t *testing.T) {
 	}
 
 	// Schedule the agent
-	err := s.ScheduleAgent(req)
+	err := s.ScheduleAgent(ctx, req)
 	if err != nil {
 		t.Fatalf("Failed to schedule agent: %v", err)
 	}
 
 	// Start scheduler
-	ctx, cancel := context.WithCancel(context.Background())
+	schedCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go s.Start(ctx)
+	go s.Start(schedCtx)
 
 	// Wait for scheduling event
 	select {
@@ -109,6 +111,8 @@ func TestSchedulerNoCapacity(t *testing.T) {
 
 	s := scheduler.New(logger, config)
 
+	ctx := context.Background()
+
 	// Register a small node
 	node := &scheduler.Node{
 		ID:   "node-1",
@@ -122,7 +126,7 @@ func TestSchedulerNoCapacity(t *testing.T) {
 		Agents:    make(map[api.AgentID]*scheduler.AgentAllocation),
 	}
 
-	s.RegisterNode(node)
+	s.RegisterNode(ctx, node)
 
 	// Request more than available
 	agentConfig := api.AgentConfig{
@@ -143,16 +147,16 @@ func TestSchedulerNoCapacity(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 
-	err := s.ScheduleAgent(req)
+	err := s.ScheduleAgent(ctx, req)
 	if err != nil {
 		t.Fatalf("Failed to queue agent: %v", err)
 	}
 
 	// Start scheduler
-	ctx, cancel := context.WithCancel(context.Background())
+	schedCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go s.Start(ctx)
+	go s.Start(schedCtx)
 
 	// Should fail to schedule
 	select {
@@ -191,6 +195,8 @@ func TestPlacementStrategies(t *testing.T) {
 
 			s := scheduler.New(logger, config)
 
+			ctx := context.Background()
+
 			// Register two nodes
 			node1 := &scheduler.Node{
 				ID:   "node-1",
@@ -216,8 +222,8 @@ func TestPlacementStrategies(t *testing.T) {
 				Agents:    make(map[api.AgentID]*scheduler.AgentAllocation),
 			}
 
-			s.RegisterNode(node1)
-			s.RegisterNode(node2)
+			s.RegisterNode(ctx, node1)
+			s.RegisterNode(ctx, node2)
 
 			// Schedule an agent
 			agentConfig := api.AgentConfig{
@@ -238,7 +244,7 @@ func TestPlacementStrategies(t *testing.T) {
 				CreatedAt: time.Now(),
 			}
 
-			err := s.ScheduleAgent(req)
+			err := s.ScheduleAgent(ctx, req)
 			if err != nil {
 				t.Fatalf("Failed to schedule agent: %v", err)
 			}

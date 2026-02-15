@@ -117,7 +117,7 @@ resource "aws_db_instance" "aether" {
 
   db_name  = "aether"
   username = var.postgres_username
-  password = var.postgres_password
+  password = random_password.postgres_master.result
 
   db_subnet_group_name   = aws_db_subnet_group.aether.name
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -187,7 +187,7 @@ resource "aws_elasticache_replication_group" "aether" {
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
   auth_token_enabled         = true
-  auth_token                 = var.redis_auth_token
+  auth_token                 = random_password.redis_auth.result
 
   automatic_failover_enabled = var.redis_num_nodes > 1
   multi_az_enabled           = var.redis_num_nodes > 1
@@ -361,41 +361,4 @@ resource "aws_cloudwatch_log_group" "aether" {
   }
 }
 
-# Secrets Manager for sensitive data
-resource "aws_secretsmanager_secret" "postgres" {
-  name        = "${var.cluster_name}/postgres"
-  description = "PostgreSQL credentials for Aether"
-
-  tags = {
-    Name = "${var.cluster_name}-postgres-secret"
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "postgres" {
-  secret_id = aws_secretsmanager_secret.postgres.id
-  secret_string = jsonencode({
-    username = var.postgres_username
-    password = var.postgres_password
-    host     = aws_db_instance.aether.address
-    port     = aws_db_instance.aether.port
-    database = aws_db_instance.aether.db_name
-  })
-}
-
-resource "aws_secretsmanager_secret" "redis" {
-  name        = "${var.cluster_name}/redis"
-  description = "Redis credentials for Aether"
-
-  tags = {
-    Name = "${var.cluster_name}-redis-secret"
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "redis" {
-  secret_id = aws_secretsmanager_secret.redis.id
-  secret_string = jsonencode({
-    host      = aws_elasticache_replication_group.aether.primary_endpoint_address
-    port      = 6379
-    auth_token = var.redis_auth_token
-  })
-}
+# Secrets Manager for sensitive data - moved to passwords.tf

@@ -14,11 +14,22 @@ import (
 	"github.com/aether-runtime/aether/pkg/api"
 )
 
+// StateStore defines the interface for persistent agent state storage.
+type StateStore interface {
+	CreateAgent(ctx context.Context, config api.AgentConfig) error
+	GetAgent(ctx context.Context, agentID api.AgentID) (*api.AgentInfo, error)
+	ListAgents(ctx context.Context, tenantID api.TenantID) ([]*api.AgentInfo, error)
+	UpdateAgentStatus(ctx context.Context, agentID api.AgentID, status api.AgentStatus) error
+	SetAgentError(ctx context.Context, agentID api.AgentID, errMsg string) error
+	DeleteAgent(ctx context.Context, agentID api.AgentID) error
+}
+
 // Runtime is the main Aether runtime that manages agent lifecycle.
 type Runtime struct {
-	logger    *slog.Logger
-	vmManager *vm.Manager
-	config    Config
+	logger     *slog.Logger
+	vmManager  *vm.Manager
+	stateStore StateStore
+	config     Config
 
 	mu     sync.RWMutex
 	agents map[api.AgentID]*agent.Agent
@@ -37,17 +48,18 @@ type Config struct {
 }
 
 // New creates a new Aether runtime.
-func New(logger *slog.Logger, config Config) (*Runtime, error) {
+func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, error) {
 	vmManager, err := vm.NewManager(logger, config.VMManagerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VM manager: %w", err)
 	}
 
 	return &Runtime{
-		logger:    logger,
-		vmManager: vmManager,
-		config:    config,
-		agents:    make(map[api.AgentID]*agent.Agent),
+		logger:     logger,
+		vmManager:  vmManager,
+		stateStore: stateStore,
+		config:     config,
+		agents:     make(map[api.AgentID]*agent.Agent),
 	}, nil
 }
 
@@ -99,10 +111,21 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	// Create the agent
 	agentInstance := agent.New(r.logger, config, vmAdapter)
 
-	// Store the agent
+	// Store the agent in memory
 	r.mu.Lock()
 	r.agents[config.ID] = agentInstance
 	r.mu.Unlock()
+
+	// Persist to state store if available
+	if r.stateStore != nil {
+		if err := r.stateStore.CreateAgent(ctx, config); err != nil {
+			r.logger.ErrorContext(ctx, "failed to persist agent to state store",
+				"agent_id", config.ID,
+				"error", err,
+			)
+			// Continue anyway - agent exists in memory
+		}
+	}
 
 	r.logger.InfoContext(ctx, "agent created successfully", "agent_id", config.ID)
 	return nil
@@ -121,6 +144,16 @@ func (r *Runtime) StartAgent(ctx context.Context, id api.AgentID) error {
 		return fmt.Errorf("failed to start agent: %w", err)
 	}
 
+	// Update status in state store
+	if r.stateStore != nil {
+		if err := r.stateStore.UpdateAgentStatus(ctx, id, api.AgentStatusRunning); err != nil {
+			r.logger.WarnContext(ctx, "failed to update agent status in state store",
+				"agent_id", id,
+				"error", err,
+			)
+		}
+	}
+
 	return nil
 }
 
@@ -135,6 +168,16 @@ func (r *Runtime) StopAgent(ctx context.Context, id api.AgentID, timeout time.Du
 
 	if err := agentInstance.Stop(ctx, timeout); err != nil {
 		return fmt.Errorf("failed to stop agent: %w", err)
+	}
+
+	// Update status in state store
+	if r.stateStore != nil {
+		if err := r.stateStore.UpdateAgentStatus(ctx, id, api.AgentStatusStopped); err != nil {
+			r.logger.WarnContext(ctx, "failed to update agent status in state store",
+				"agent_id", id,
+				"error", err,
+			)
+		}
 	}
 
 	return nil
@@ -153,10 +196,20 @@ func (r *Runtime) DestroyAgent(ctx context.Context, id api.AgentID) error {
 		return fmt.Errorf("failed to destroy agent: %w", err)
 	}
 
-	// Remove from map
+	// Remove from memory
 	r.mu.Lock()
 	delete(r.agents, id)
 	r.mu.Unlock()
+
+	// Delete from state store
+	if r.stateStore != nil {
+		if err := r.stateStore.DeleteAgent(ctx, id); err != nil {
+			r.logger.WarnContext(ctx, "failed to delete agent from state store",
+				"agent_id", id,
+				"error", err,
+			)
+		}
+	}
 
 	r.logger.InfoContext(ctx, "agent destroyed successfully", "agent_id", id)
 	return nil

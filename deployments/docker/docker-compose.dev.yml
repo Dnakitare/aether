@@ -16,6 +16,26 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    # Security hardening
+    user: "999:999"  # redis user in alpine
+    read_only: false  # Redis needs to write to /data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped
 
   # PostgreSQL for durable storage
   postgres:
@@ -35,6 +55,28 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    # Security hardening
+    user: "70:70"  # postgres user in alpine
+    read_only: false  # PostgreSQL needs to write to /var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - CHOWN
+      - DAC_OVERRIDE
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    restart: unless-stopped
 
   # Kafka for event streaming (Phase 5)
   # Commented out for Phase 1, will be enabled in Phase 5

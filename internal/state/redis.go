@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/aether-runtime/aether/pkg/api"
@@ -71,26 +73,32 @@ func NewRedisStore(logger *slog.Logger, config Config) (*RedisStore, error) {
 	}, nil
 }
 
-// SaveAgentState saves agent state to Redis.
+// SaveAgentState saves agent state to Redis atomically.
+// Uses Redis pipeline to ensure both agent key and tenant set are updated together.
 func (rs *RedisStore) SaveAgentState(ctx context.Context, info *api.AgentInfo) error {
-	key := rs.agentKey(info.Config.ID)
+	agentKey := rs.agentKey(info.Config.ID)
+	tenantKey := rs.tenantAgentsKey(info.Config.TenantID)
 
 	data, err := json.Marshal(info)
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent info: %w", err)
 	}
 
-	if err := rs.client.Set(ctx, key, data, rs.config.DefaultTTL).Err(); err != nil {
+	// Use Redis pipeline for atomic execution of both operations
+	pipe := rs.client.Pipeline()
+	pipe.Set(ctx, agentKey, data, rs.config.DefaultTTL)
+	pipe.SAdd(ctx, tenantKey, string(info.Config.ID))
+
+	// Execute pipeline atomically
+	_, err = pipe.Exec(ctx)
+	if err != nil {
 		return fmt.Errorf("failed to save agent state: %w", err)
 	}
 
-	// Add to tenant's agent set
-	tenantKey := rs.tenantAgentsKey(info.Config.TenantID)
-	if err := rs.client.SAdd(ctx, tenantKey, info.Config.ID).Err(); err != nil {
-		rs.logger.WarnContext(ctx, "failed to add agent to tenant set", "error", err)
-	}
-
-	rs.logger.DebugContext(ctx, "agent state saved", "agent_id", info.Config.ID)
+	rs.logger.DebugContext(ctx, "agent state saved",
+		"agent_id", info.Config.ID,
+		"tenant_id", info.Config.TenantID,
+	)
 	return nil
 }
 
@@ -114,21 +122,27 @@ func (rs *RedisStore) GetAgentState(ctx context.Context, agentID api.AgentID) (*
 	return &info, nil
 }
 
-// DeleteAgentState deletes agent state from Redis.
+// DeleteAgentState deletes agent state from Redis atomically.
+// Uses Redis pipeline to ensure both agent key and tenant set are updated together.
 func (rs *RedisStore) DeleteAgentState(ctx context.Context, agentID api.AgentID, tenantID api.TenantID) error {
-	key := rs.agentKey(agentID)
+	agentKey := rs.agentKey(agentID)
+	tenantKey := rs.tenantAgentsKey(tenantID)
 
-	if err := rs.client.Del(ctx, key).Err(); err != nil {
+	// Use Redis pipeline for atomic execution of both operations
+	pipe := rs.client.Pipeline()
+	pipe.Del(ctx, agentKey)
+	pipe.SRem(ctx, tenantKey, string(agentID))
+
+	// Execute pipeline atomically
+	_, err := pipe.Exec(ctx)
+	if err != nil {
 		return fmt.Errorf("failed to delete agent state: %w", err)
 	}
 
-	// Remove from tenant's agent set
-	tenantKey := rs.tenantAgentsKey(tenantID)
-	if err := rs.client.SRem(ctx, tenantKey, agentID).Err(); err != nil {
-		rs.logger.WarnContext(ctx, "failed to remove agent from tenant set", "error", err)
-	}
-
-	rs.logger.DebugContext(ctx, "agent state deleted", "agent_id", agentID)
+	rs.logger.DebugContext(ctx, "agent state deleted",
+		"agent_id", agentID,
+		"tenant_id", tenantID,
+	)
 	return nil
 }
 
@@ -149,33 +163,148 @@ func (rs *RedisStore) ListAgentsByTenant(ctx context.Context, tenantID api.Tenan
 	return agentIDs, nil
 }
 
-// Lock acquires a distributed lock.
-func (rs *RedisStore) Lock(ctx context.Context, name string, ttl time.Duration) (bool, error) {
+// Lock represents an acquired distributed lock with ownership token.
+type Lock struct {
+	key       string
+	token     string
+	ttl       time.Duration
+	store     *RedisStore
+	cancelCtx context.Context
+	cancelFn  context.CancelFunc
+	wg        sync.WaitGroup
+}
+
+// Lock acquires a distributed lock with ownership token.
+// Returns a Lock instance that must be unlocked when done.
+// The lock includes an automatic watchdog that extends TTL while held.
+func (rs *RedisStore) Lock(ctx context.Context, name string, ttl time.Duration) (*Lock, error) {
 	key := rs.lockKey(name)
+	token := uuid.New().String()
 
-	// Try to acquire lock using SET NX (set if not exists)
-	ok, err := rs.client.SetNX(ctx, key, "locked", ttl).Result()
+	// Lua script for atomic SET NX with token
+	// This ensures we only set the key if it doesn't exist
+	script := `
+		if redis.call("set", KEYS[1], ARGV[1], "NX", "EX", ARGV[2]) then
+			return 1
+		end
+		return 0
+	`
+
+	result, err := rs.client.Eval(ctx, script, []string{key}, token, int(ttl.Seconds())).Int()
 	if err != nil {
-		return false, fmt.Errorf("failed to acquire lock: %w", err)
+		return nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
 
-	if ok {
-		rs.logger.DebugContext(ctx, "lock acquired", "name", name)
+	if result == 0 {
+		return nil, fmt.Errorf("lock already held by another process")
 	}
 
-	return ok, nil
+	// Create lock instance
+	lockCtx, cancelFn := context.WithCancel(context.Background())
+	lock := &Lock{
+		key:       key,
+		token:     token,
+		ttl:       ttl,
+		store:     rs,
+		cancelCtx: lockCtx,
+		cancelFn:  cancelFn,
+	}
+
+	// Start watchdog to extend TTL
+	lock.wg.Add(1)
+	go lock.watchdog()
+
+	rs.logger.DebugContext(ctx, "lock acquired", "name", name, "token", token)
+	return lock, nil
+}
+
+// TryLock attempts to acquire a lock without blocking.
+// Returns nil if lock is already held.
+func (rs *RedisStore) TryLock(ctx context.Context, name string, ttl time.Duration) (*Lock, error) {
+	return rs.Lock(ctx, name, ttl)
 }
 
 // Unlock releases a distributed lock.
-func (rs *RedisStore) Unlock(ctx context.Context, name string) error {
-	key := rs.lockKey(name)
+// Only the process that acquired the lock (matching token) can release it.
+func (rs *RedisStore) Unlock(ctx context.Context, lock *Lock) error {
+	if lock == nil {
+		return fmt.Errorf("lock is nil")
+	}
 
-	if err := rs.client.Del(ctx, key).Err(); err != nil {
+	// Stop watchdog
+	lock.cancelFn()
+	lock.wg.Wait()
+
+	// Lua script for atomic check-and-delete
+	// This ensures we only delete the lock if we own it (token matches)
+	script := `
+		if redis.call("get", KEYS[1]) == ARGV[1] then
+			return redis.call("del", KEYS[1])
+		else
+			return 0
+		end
+	`
+
+	result, err := rs.client.Eval(ctx, script, []string{lock.key}, lock.token).Int()
+	if err != nil {
 		return fmt.Errorf("failed to release lock: %w", err)
 	}
 
-	rs.logger.DebugContext(ctx, "lock released", "name", name)
+	if result == 0 {
+		rs.logger.WarnContext(ctx, "lock not held or expired", "key", lock.key)
+		return fmt.Errorf("lock not held or expired (token mismatch)")
+	}
+
+	rs.logger.DebugContext(ctx, "lock released", "key", lock.key)
 	return nil
+}
+
+// watchdog periodically extends the lock TTL while it's held.
+// This prevents the lock from expiring during long operations.
+func (l *Lock) watchdog() {
+	defer l.wg.Done()
+
+	ticker := time.NewTicker(l.ttl / 3) // Extend at 1/3 of TTL
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-l.cancelCtx.Done():
+			return
+		case <-ticker.C:
+			l.extendTTL()
+		}
+	}
+}
+
+// extendTTL extends the lock TTL if we still own it.
+func (l *Lock) extendTTL() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Lua script for atomic check-and-extend
+	// Only extend if the token matches (we still own the lock)
+	script := `
+		if redis.call("get", KEYS[1]) == ARGV[1] then
+			return redis.call("expire", KEYS[1], ARGV[2])
+		else
+			return 0
+		end
+	`
+
+	result, err := l.store.client.Eval(ctx, script, []string{l.key}, l.token, int(l.ttl.Seconds())).Int()
+	if err != nil {
+		l.store.logger.WarnContext(ctx, "failed to extend lock TTL", "error", err, "key", l.key)
+		return
+	}
+
+	if result == 0 {
+		l.store.logger.WarnContext(ctx, "lock lost (token mismatch or expired)", "key", l.key)
+		// Stop watchdog since we no longer own the lock
+		l.cancelFn()
+	} else {
+		l.store.logger.DebugContext(ctx, "lock TTL extended", "key", l.key, "ttl", l.ttl)
+	}
 }
 
 // SetSession stores a session.
@@ -309,6 +438,11 @@ func (rs *RedisStore) Health(ctx context.Context) error {
 		return fmt.Errorf("redis health check failed: %w", err)
 	}
 	return nil
+}
+
+// GetClient returns the underlying Redis client for testing purposes.
+func (rs *RedisStore) GetClient() *redis.Client {
+	return rs.client
 }
 
 // Key builders

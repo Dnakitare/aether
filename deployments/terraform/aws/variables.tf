@@ -116,8 +116,9 @@ variable "postgres_username" {
 }
 
 variable "postgres_password" {
-  description = "PostgreSQL master password"
+  description = "PostgreSQL master password (DEPRECATED: Now auto-generated in passwords.tf)"
   type        = string
+  default     = null
   sensitive   = true
 }
 
@@ -147,8 +148,9 @@ variable "redis_num_nodes" {
 }
 
 variable "redis_auth_token" {
-  description = "Redis auth token"
+  description = "Redis auth token (DEPRECATED: Now auto-generated in passwords.tf)"
   type        = string
+  default     = null
   sensitive   = true
 }
 

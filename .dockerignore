@@ -1,0 +1,87 @@
+# Dockerignore file for Aether
+# Prevents copying unnecessary files into Docker image
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Documentation
+*.md
+!README.md
+docs/
+.claude/
+
+# Tests
+*_test.go
+testdata/
+coverage.txt
+*.test
+
+# Build artifacts
+bin/
+dist/
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+.DS_Store
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+secrets/
+
+# Deployment
+deployments/
+!deployments/docker/Dockerfile
+
+# Kubernetes
+k8s/
+*.yaml
+*.yml
+!docker-compose.yml
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+
+# Logs
+*.log
+logs/
+
+# Dependencies (will be downloaded in Docker build)
+vendor/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+*.cache

@@ -2,14 +2,21 @@ package security_test
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aether-runtime/aether/internal/api"
 	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/aether-runtime/aether/internal/scaler"
+	"github.com/aether-runtime/aether/internal/scheduler"
+	"github.com/aether-runtime/aether/internal/tenant"
+	pkgapi "github.com/aether-runtime/aether/pkg/api"
 )
 
 // TestAuthenticationRequired verifies that all API endpoints require authentication.
@@ -134,11 +141,119 @@ func TestHealthEndpointsUnauthenticated(t *testing.T) {
 // Helper functions
 
 func setupTestServer(t *testing.T) http.Handler {
-	// This would be your actual server setup
-	// For now, returning a mock handler
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
+	// Create logger
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelError, // Reduce noise in tests
+	}))
+
+	// Create JWT manager
+	jwtMgr, err := auth.NewJWTManager(auth.Config{
+		SecretKey:     "test-secret-key-min-32-chars-long!!",
+		TokenDuration: 1 * time.Hour,
 	})
+	if err != nil {
+		t.Fatalf("failed to create JWT manager: %v", err)
+	}
+
+	// Create mock scheduler
+	schedConfig := scheduler.Config{
+		Strategy:        scheduler.BinPacking,
+		Interval:        1 * time.Second,
+		EventBufferSize: 10,
+	}
+	sched := scheduler.New(logger, schedConfig)
+
+	// Create mock metrics provider and scale executor for scaler
+	var metricsProvider mockMetricsProvider
+	var executor mockScaleExecutor
+
+	// Create mock scaler
+	scalerConfig := scaler.Config{
+		Interval:        30 * time.Second,
+		DefaultCooldown: 5 * time.Minute,
+	}
+	sc := scaler.New(logger, scalerConfig, &metricsProvider, &executor)
+
+	// Create mock quota manager (nil is acceptable for these tests)
+	var qm *tenant.QuotaManager
+
+	// Create mock runtime
+	var runtime mockRuntime
+
+	// Create API server with authentication enabled
+	serverConfig := api.Config{
+		Address:      ":8080",
+		EnableAuth:   true, // Enable authentication
+		EnableCORS:   false,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+	}
+
+	server := api.New(logger, serverConfig, &runtime, sched, sc, qm, jwtMgr)
+
+	// Return the router which implements http.Handler
+	return server.Router()
+}
+
+// mockRuntime is a minimal runtime implementation for testing
+type mockRuntime struct{}
+
+func (m *mockRuntime) CreateAgent(ctx context.Context, config pkgapi.AgentConfig) error {
+	return nil
+}
+
+func (m *mockRuntime) StartAgent(ctx context.Context, id pkgapi.AgentID) error {
+	return nil
+}
+
+func (m *mockRuntime) StopAgent(ctx context.Context, id pkgapi.AgentID, timeout time.Duration) error {
+	return nil
+}
+
+func (m *mockRuntime) DestroyAgent(ctx context.Context, id pkgapi.AgentID) error {
+	return nil
+}
+
+func (m *mockRuntime) GetAgent(ctx context.Context, id pkgapi.AgentID) (*pkgapi.AgentInfo, error) {
+	return nil, nil
+}
+
+func (m *mockRuntime) ListAgents(ctx context.Context, tenantID *pkgapi.TenantID) ([]*pkgapi.AgentInfo, error) {
+	return []*pkgapi.AgentInfo{}, nil
+}
+
+func (m *mockRuntime) GetAgentLogs(ctx context.Context, id pkgapi.AgentID, follow bool) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (m *mockRuntime) GetAgentHealth(ctx context.Context, id pkgapi.AgentID) (*pkgapi.HealthStatus, error) {
+	return &pkgapi.HealthStatus{Healthy: true}, nil
+}
+
+func (m *mockRuntime) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+// mockMetricsProvider is a minimal metrics provider for testing
+type mockMetricsProvider struct{}
+
+func (m *mockMetricsProvider) GetAgentMetrics(ctx context.Context, agentID pkgapi.AgentID) (*pkgapi.AgentMetrics, error) {
+	return nil, nil
+}
+
+func (m *mockMetricsProvider) GetTenantMetrics(ctx context.Context, tenantID pkgapi.TenantID) (*scaler.TenantMetrics, error) {
+	return nil, nil
+}
+
+// mockScaleExecutor is a minimal scale executor for testing
+type mockScaleExecutor struct{}
+
+func (m *mockScaleExecutor) ScaleUp(ctx context.Context, target scaler.ScaleTarget, count int) error {
+	return nil
+}
+
+func (m *mockScaleExecutor) ScaleDown(ctx context.Context, target scaler.ScaleTarget, count int) error {
+	return nil
 }
 
 func generateExpiredToken(t *testing.T) string {

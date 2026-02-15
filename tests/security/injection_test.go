@@ -2,6 +2,7 @@ package security_test
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -69,16 +70,16 @@ func TestTableWhitelistEnforcement(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		table    string
-		allowed  bool
+		table   string
+		allowed bool
 	}{
 		{"agents", true},
 		{"tenants", true},
 		{"audit_logs", true},
 		{"checkpoints", true},
 		{"quotas", true},
-		{"users", false},          // Not in whitelist
-		{"pg_user", false},         // System table
+		{"users", false},   // Not in whitelist
+		{"pg_user", false}, // System table
 		{"information_schema", false},
 	}
 
@@ -99,23 +100,21 @@ func TestTableWhitelistEnforcement(t *testing.T) {
 
 // TestDeviceNameValidation verifies device name regex enforcement.
 func TestDeviceNameValidation(t *testing.T) {
-	ctx := context.Background()
-
 	tests := []struct {
-		name    string
-		valid   bool
+		name  string
+		valid bool
 	}{
 		{"tap0", true},
 		{"eth-vm-123", true},
 		{"valid-device", true},
 		{"ABC123", true},
-		{"", false},                    // Empty
-		{"a", true},                    // Min length
-		{"a234567890123456", false},   // Too long (>15)
-		{"tap0;", false},               // Special char
-		{"tap0 ", false},               // Space
-		{"../tap0", false},             // Path traversal
-		{"tap$0", false},               // Dollar sign
+		{"", false},                 // Empty
+		{"a", true},                 // Min length
+		{"a234567890123456", false}, // Too long (>15)
+		{"tap0;", false},            // Special char
+		{"tap0 ", false},            // Space
+		{"../tap0", false},          // Path traversal
+		{"tap$0", false},            // Dollar sign
 	}
 
 	for _, tt := range tests {

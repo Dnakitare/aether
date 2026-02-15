@@ -108,8 +108,8 @@ func (s *Scheduler) Events() <-chan ScheduleEvent {
 }
 
 // ScheduleAgent adds an agent to the scheduling queue.
-func (s *Scheduler) ScheduleAgent(req *AgentRequest) error {
-	s.logger.InfoContext(context.Background(),
+func (s *Scheduler) ScheduleAgent(ctx context.Context, req *AgentRequest) error {
+	s.logger.InfoContext(ctx,
 		"queuing agent for scheduling",
 		"agent_id", req.Config.ID,
 		"tenant_id", req.Config.TenantID,
@@ -122,20 +122,20 @@ func (s *Scheduler) ScheduleAgent(req *AgentRequest) error {
 }
 
 // UnscheduleAgent removes an agent from the scheduling queue or node.
-func (s *Scheduler) UnscheduleAgent(agentID api.AgentID) {
-	s.logger.InfoContext(context.Background(), "unscheduling agent", "agent_id", agentID)
+func (s *Scheduler) UnscheduleAgent(ctx context.Context, agentID api.AgentID) {
+	s.logger.InfoContext(ctx, "unscheduling agent", "agent_id", agentID)
 
 	// Remove from queue if pending
 	s.queue.Remove(agentID)
 
 	// Remove from node if allocated
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	for _, node := range s.nodes {
-		if _, exists := node.Agents[agentID]; exists {
+		if node.HasAgent(agentID) {
 			node.Deallocate(agentID)
-			s.logger.InfoContext(context.Background(),
+			s.logger.InfoContext(ctx,
 				"deallocated agent from node",
 				"agent_id", agentID,
 				"node_id", node.ID,
@@ -146,12 +146,12 @@ func (s *Scheduler) UnscheduleAgent(agentID api.AgentID) {
 }
 
 // RegisterNode adds a node to the scheduler.
-func (s *Scheduler) RegisterNode(node *Node) {
+func (s *Scheduler) RegisterNode(ctx context.Context, node *Node) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.nodes[node.ID] = node
-	s.logger.InfoContext(context.Background(),
+	s.logger.InfoContext(ctx,
 		"registered node",
 		"node_id", node.ID,
 		"cpu_cores", node.Capacity.CPUCores,
@@ -160,7 +160,7 @@ func (s *Scheduler) RegisterNode(node *Node) {
 }
 
 // UnregisterNode removes a node from the scheduler.
-func (s *Scheduler) UnregisterNode(nodeID string) error {
+func (s *Scheduler) UnregisterNode(ctx context.Context, nodeID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -170,12 +170,13 @@ func (s *Scheduler) UnregisterNode(nodeID string) error {
 	}
 
 	// Check if node has any agents
-	if len(node.Agents) > 0 {
-		return fmt.Errorf("cannot unregister node %s: has %d active agents", nodeID, len(node.Agents))
+	agentCount := node.AgentCount()
+	if agentCount > 0 {
+		return fmt.Errorf("cannot unregister node %s: has %d active agents", nodeID, agentCount)
 	}
 
 	delete(s.nodes, nodeID)
-	s.logger.InfoContext(context.Background(), "unregistered node", "node_id", nodeID)
+	s.logger.InfoContext(ctx, "unregistered node", "node_id", nodeID)
 	return nil
 }
 
@@ -212,12 +213,15 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		return // Queue is empty
 	}
 
-	s.mu.RLock()
+	// Lock for the entire check-and-allocate operation to prevent race conditions
+	// This ensures no other goroutine can allocate resources between our check and allocation
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	nodeList := make([]*Node, 0, len(s.nodes))
 	for _, node := range s.nodes {
 		nodeList = append(nodeList, node)
 	}
-	s.mu.RUnlock()
 
 	// Try to find a suitable node
 	node, err := s.placer.SelectNode(req, nodeList)
@@ -230,7 +234,7 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		)
 
 		// Send event about failed scheduling
-		s.sendEvent(ScheduleEvent{
+		s.sendEvent(ctx, ScheduleEvent{
 			AgentID:   req.Config.ID,
 			Success:   false,
 			Error:     err,
@@ -239,10 +243,26 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		return
 	}
 
-	// Allocate resources on the node
-	s.mu.Lock()
+	// Verify node can still fit (double-check under lock to prevent race conditions)
+	if !node.CanFit(req.Resources) {
+		// Node capacity changed between selection and now, retry later
+		s.logger.DebugContext(ctx,
+			"node capacity changed, agent no longer fits",
+			"agent_id", req.Config.ID,
+			"node_id", node.ID,
+		)
+
+		s.sendEvent(ctx, ScheduleEvent{
+			AgentID:   req.Config.ID,
+			Success:   false,
+			Error:     fmt.Errorf("node capacity changed"),
+			Timestamp: time.Now(),
+		})
+		return
+	}
+
+	// Allocate resources on the node (still under scheduler lock)
 	node.Allocate(req.Config.ID, req.Config.TenantID, req.Resources)
-	s.mu.Unlock()
 
 	// Remove from queue (successfully scheduled)
 	s.queue.Dequeue()
@@ -255,7 +275,7 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 	)
 
 	// Send event about successful scheduling
-	s.sendEvent(ScheduleEvent{
+	s.sendEvent(ctx, ScheduleEvent{
 		AgentID:   req.Config.ID,
 		NodeID:    node.ID,
 		Success:   true,
@@ -264,12 +284,12 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 }
 
 // sendEvent sends a scheduling event to the event channel (non-blocking).
-func (s *Scheduler) sendEvent(event ScheduleEvent) {
+func (s *Scheduler) sendEvent(ctx context.Context, event ScheduleEvent) {
 	select {
 	case s.events <- event:
 	default:
 		// Event channel is full, log and drop
-		s.logger.WarnContext(context.Background(),
+		s.logger.WarnContext(ctx,
 			"event channel full, dropping event",
 			"agent_id", event.AgentID,
 		)

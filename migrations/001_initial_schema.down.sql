@@ -1,0 +1,12 @@
+-- Rollback initial schema migration
+-- WARNING: This will delete all data!
+
+DROP TABLE IF EXISTS agent_placements CASCADE;
+DROP TABLE IF EXISTS scheduler_nodes CASCADE;
+DROP TABLE IF EXISTS api_keys CASCADE;
+DROP TABLE IF EXISTS quota_usage CASCADE;
+DROP TABLE IF EXISTS quotas CASCADE;
+DROP TABLE IF EXISTS audit_logs CASCADE;
+DROP TABLE IF EXISTS checkpoints CASCADE;
+DROP TABLE IF EXISTS agents CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;

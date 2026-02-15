@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // LogStreamer streams logs from an agent.
@@ -42,24 +43,27 @@ func (ls *LogStreamer) Stream(ctx context.Context, follow bool) (io.ReadCloser, 
 		defer pw.Close()
 
 		scanner := bufio.NewScanner(file)
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
+				// Context cancelled - clean exit
 				return
-			default:
-				if scanner.Scan() {
+			case <-ticker.C:
+				// Check for new lines periodically
+				for scanner.Scan() {
 					line := scanner.Text() + "\n"
 					if _, err := pw.Write([]byte(line)); err != nil {
+						// Write failed (likely pipe closed) - exit
 						return
 					}
-				} else {
-					// No more lines, wait a bit before checking again
-					select {
-					case <-ctx.Done():
-						return
-					case <-ctx.Done():
-						return
-					}
+				}
+				// Check for scanner errors
+				if err := scanner.Err(); err != nil {
+					pw.CloseWithError(fmt.Errorf("scanner error: %w", err))
+					return
 				}
 			}
 		}
