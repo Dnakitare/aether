@@ -3,6 +3,7 @@ package vm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -265,28 +266,81 @@ func (v *VM) waitForReady(ctx context.Context, timeout time.Duration) error {
 	}
 }
 
+// FirecrackerConfig is the complete Firecracker VM configuration.
+type FirecrackerConfig struct {
+	BootSource        BootSource     `json:"boot-source"`
+	Drives            []Drive        `json:"drives"`
+	MachineConfig     MachineConfig  `json:"machine-config"`
+	NetworkInterfaces []NetworkIface `json:"network-interfaces,omitempty"`
+}
+
+// BootSource configures the kernel and boot parameters.
+type BootSource struct {
+	KernelImagePath string `json:"kernel_image_path"`
+	BootArgs        string `json:"boot_args"`
+}
+
+// Drive configures a block device.
+type Drive struct {
+	DriveID      string `json:"drive_id"`
+	PathOnHost   string `json:"path_on_host"`
+	IsRootDevice bool   `json:"is_root_device"`
+	IsReadOnly   bool   `json:"is_read_only"`
+}
+
+// MachineConfig configures vCPUs and memory.
+type MachineConfig struct {
+	VcpuCount  int   `json:"vcpu_count"`
+	MemSizeMib int64 `json:"mem_size_mib"`
+}
+
+// NetworkIface configures a network interface.
+type NetworkIface struct {
+	IfaceID     string `json:"iface_id"`
+	GuestMAC    string `json:"guest_mac"`
+	HostDevName string `json:"host_dev_name"`
+}
+
 // writeFirecrackerConfig writes the Firecracker configuration to a file.
 func (v *VM) writeFirecrackerConfig(path string) error {
-	// This is a simplified version - in production, use proper JSON marshaling
-	// and include all necessary Firecracker configuration options
-	config := fmt.Sprintf(`{
-  "boot-source": {
-    "kernel_image_path": "%s",
-    "boot_args": "%s"
-  },
-  "drives": [{
-    "drive_id": "rootfs",
-    "path_on_host": "%s",
-    "is_root_device": true,
-    "is_read_only": false
-  }],
-  "machine-config": {
-    "vcpu_count": %d,
-    "mem_size_mib": %d
-  }
-}`, v.Config.KernelImagePath, v.Config.BootArgs, v.Config.RootfsPath, v.Config.CPUCount, v.Config.MemoryMB)
+	config := FirecrackerConfig{
+		BootSource: BootSource{
+			KernelImagePath: v.Config.KernelImagePath,
+			BootArgs:        v.Config.BootArgs,
+		},
+		Drives: []Drive{
+			{
+				DriveID:      "rootfs",
+				PathOnHost:   v.Config.RootfsPath,
+				IsRootDevice: true,
+				IsReadOnly:   false,
+			},
+		},
+		MachineConfig: MachineConfig{
+			VcpuCount:  v.Config.CPUCount,
+			MemSizeMib: v.Config.MemoryMB,
+		},
+	}
 
-	return os.WriteFile(path, []byte(config), 0644)
+	// Add network interfaces if configured
+	if len(v.Config.NetworkInterfaces) > 0 {
+		config.NetworkInterfaces = make([]NetworkIface, 0, len(v.Config.NetworkInterfaces))
+		for _, netif := range v.Config.NetworkInterfaces {
+			config.NetworkInterfaces = append(config.NetworkInterfaces, NetworkIface{
+				IfaceID:     netif.ID,
+				GuestMAC:    netif.GuestMAC,
+				HostDevName: netif.HostDevName,
+			})
+		}
+	}
+
+	// Marshal to JSON with indentation for readability
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal firecracker config: %w", err)
+	}
+
+	return os.WriteFile(path, data, 0644)
 }
 
 // createTapDevice creates a tap network device.
