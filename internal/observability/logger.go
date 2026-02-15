@@ -76,10 +76,11 @@ func Setup(ctx context.Context, cfg Config) (*slog.Logger, func(), error) {
 		})
 	}
 
-	// Create logger with base handler
-	// Note: For Phase 4, we use basic slog. The otelslog bridge will be
-	// integrated when we have a full tracer provider setup.
-	logger := slog.New(baseHandler)
+	// Wrap with trace handler to automatically add trace_id and span_id
+	traceHandler := NewTraceHandler(baseHandler)
+
+	// Create logger with trace-aware handler
+	logger := slog.New(traceHandler)
 
 	// Add service metadata to all logs
 	logger = logger.With(

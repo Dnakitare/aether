@@ -39,6 +39,32 @@ Open Jaeger UI: http://localhost:16686
 - **Service**: `aether`
 - **Operations**: `scheduler.ScheduleAgent`, `runtime.CreateAgent`, `GET /v1/agents`, etc.
 
+## Log Correlation
+
+All logs automatically include `trace_id` and `span_id` when operations are traced, enabling correlation between logs and traces.
+
+### Example Log Output
+
+```
+level=INFO msg="creating agent" trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7 agent_id=agent-123 tenant_id=tenant-abc
+```
+
+### Viewing Correlated Logs
+
+1. **Find trace in Jaeger** → Copy the trace ID
+2. **Search logs** for that trace ID:
+   ```bash
+   # Example: grep for trace ID
+   grep "trace_id=4bf92f3577b34da6a3ce929d0e0e4736" /var/log/aether.log
+   ```
+
+3. **In production log aggregators** (Datadog, Splunk, etc.):
+   ```
+   trace_id:"4bf92f3577b34da6a3ce929d0e0e4736"
+   ```
+
+This allows you to see all logs related to a specific request, even across multiple services.
+
 ## Architecture
 
 ### Components
@@ -125,6 +151,35 @@ Span: runtime.CreateAgent
 │   ├── creating_vm
 │   ├── vm_created
 │   └── persisting_to_state_store
+```
+
+## Implementation Details
+
+### Automatic Trace ID Injection
+
+The `TraceHandler` in `internal/observability/trace_handler.go` automatically extracts trace context from the context and adds it to log records:
+
+```go
+// When you log with a traced context:
+logger.InfoContext(ctx, "operation started")
+
+// The TraceHandler automatically adds:
+// - trace_id: extracted from span context
+// - span_id: extracted from span context
+```
+
+**No manual work required** - just use `*Context` logging methods:
+- `logger.InfoContext(ctx, ...)`
+- `logger.ErrorContext(ctx, ...)`
+- `logger.DebugContext(ctx, ...)`
+
+**DON'T use non-context methods** if you want trace correlation:
+```go
+// ❌ Wrong - no trace context
+logger.Info("message")
+
+// ✅ Correct - trace context included
+logger.InfoContext(ctx, "message")
 ```
 
 ## Custom Instrumentation
