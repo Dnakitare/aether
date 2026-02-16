@@ -1,0 +1,31 @@
+apiVersion: v2
+name: aether
+description: A Helm chart for deploying Aether Runtime on Kubernetes
+type: application
+version: 0.2.0
+appVersion: "0.2.0-beta"
+
+keywords:
+  - aether
+  - runtime
+  - agents
+  - containers
+
+home: https://github.com/aether-runtime/aether
+sources:
+  - https://github.com/aether-runtime/aether
+
+maintainers:
+  - name: Aether Team
+    email: team@aether.io
+
+# Dependencies (optional - for external charts)
+# dependencies:
+#   - name: postgresql
+#     version: "12.x.x"
+#     repository: "https://charts.bitnami.com/bitnami"
+#     condition: postgresql.enabled
+#   - name: redis
+#     version: "17.x.x"
+#     repository: "https://charts.bitnami.com/bitnami"
+#     condition: redis.enabled

@@ -1,0 +1,84 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+{{- if .Values.ingress.enabled }}
+
+The Aether API is available at:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if contains "NodePort" .Values.apiServer.service.type }}
+
+The Aether API is available at:
+
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "aether.fullname" . }}-api)
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+
+{{- else if contains "LoadBalancer" .Values.apiServer.service.type }}
+
+The Aether API is available at:
+
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "aether.fullname" . }}-api --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.apiServer.service.port }}
+
+NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+
+{{- else if contains "ClusterIP" .Values.apiServer.service.type }}
+
+The Aether API is running on ClusterIP. To access it:
+
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "aether.name" . }},app.kubernetes.io/component=api-server" -o jsonpath="{.items[0].metadata.name}")
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:8080
+
+Then access the API at: http://127.0.0.1:8080
+
+{{- end }}
+
+{{- if .Values.postgresql.enabled }}
+
+PostgreSQL is deployed as part of this release.
+{{- else }}
+
+PostgreSQL is configured to use an external database at: {{ .Values.postgresql.external.host }}:{{ .Values.postgresql.external.port }}
+{{- end }}
+
+{{- if .Values.redis.enabled }}
+
+Redis is deployed as part of this release.
+{{- else }}
+
+Redis is configured to use an external instance at: {{ .Values.redis.external.host }}:{{ .Values.redis.external.port }}
+{{- end }}
+
+Useful commands:
+
+  # View API server logs
+  kubectl logs -f -l app.kubernetes.io/component=api-server -n {{ .Release.Namespace }}
+
+  # View scheduler logs
+  kubectl logs -f -l app.kubernetes.io/component=scheduler -n {{ .Release.Namespace }}
+
+  # Get all pods
+  kubectl get pods -n {{ .Release.Namespace }}
+
+  # Get all services
+  kubectl get svc -n {{ .Release.Namespace }}
+
+{{- if .Values.apiServer.autoscaling.enabled }}
+
+Auto-scaling is enabled for the API server:
+  Min replicas: {{ .Values.apiServer.autoscaling.minReplicas }}
+  Max replicas: {{ .Values.apiServer.autoscaling.maxReplicas }}
+  Target CPU: {{ .Values.apiServer.autoscaling.targetCPUUtilizationPercentage }}%
+  Target Memory: {{ .Values.apiServer.autoscaling.targetMemoryUtilizationPercentage }}%
+
+{{- end }}
+
+For more information, visit: https://github.com/aether-runtime/aether
