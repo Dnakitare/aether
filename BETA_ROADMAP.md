@@ -153,7 +153,7 @@
   - Security groups
   - Example configurations
 
-- [ ] **Day 32-34**: Kubernetes support
+- [x] **Day 32-34**: Kubernetes support
   - Helm chart
   - StatefulSet for scheduler
   - HPA configuration
@@ -306,7 +306,7 @@
 **Status**: ✅ COMPLETE (100% done)
 
 ### Week 5: Deployment & Infrastructure
-**Status**: 🚧 In Progress (33% done - Day 29-31 complete)
+**Status**: 🚧 In Progress (67% done - Day 29-34 complete)
 
 **Week 1-2 Completed Tasks:**
 - [x] Create Beta branch
@@ -425,11 +425,42 @@
 - [x] Added terraform.tfvars.example for quick start
 - [x] Configured 40+ variables for customization
 
-**Day 32-34: Kubernetes Support** (Next)
-- [ ] Helm chart
-- [ ] StatefulSet for scheduler
-- [ ] HPA configuration
-- [ ] Network policies
+**Day 32-34: Kubernetes Support** ✅
+- [x] Created complete Helm chart structure
+  * Chart.yaml with metadata and version info
+  * values.yaml with 300+ configuration options
+  * Template helpers (_helpers.tpl) for common functions
+  * NOTES.txt with post-install instructions
+- [x] Implemented Kubernetes manifests
+  * ServiceAccount for pod identity
+  * RBAC (Role and RoleBinding) with minimal permissions
+  * ConfigMap for environment configuration
+  * API server Deployment with health checks
+  * API server Service (ClusterIP)
+  * Scheduler StatefulSet with persistence
+  * Scheduler headless Service
+  * PodDisruptionBudget for HA
+- [x] Configured auto-scaling
+  * HorizontalPodAutoscaler for API server
+  * CPU and memory-based scaling (70%/80%)
+  * Min 2, max 10 replicas
+  * Smart scaling behavior (fast up, gradual down)
+- [x] Added networking and security
+  * Ingress for external access (nginx, traefik support)
+  * NetworkPolicy for pod-to-pod isolation
+  * TLS/SSL certificate support
+  * ServiceMonitor for Prometheus integration
+- [x] Created comprehensive documentation
+  * 450+ line README with examples
+  * Production deployment guide
+  * External database configuration
+  * Troubleshooting guide
+  * Security best practices
+
+**Day 35: Docker Improvements** (Next)
+- [ ] Multi-stage builds
+- [ ] Smaller images
+- [ ] Security scanning
 
 ---
 
