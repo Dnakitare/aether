@@ -176,11 +176,14 @@
 ### Week 6: Testing, Documentation & Release (Mar 22-29)
 **Focus**: Quality, Polish, Release
 
-- [ ] **Day 36-38**: Test coverage push
-  - Increase coverage to 60%+
-  - Add missing test cases
-  - Chaos testing
-  - Security testing
+- [x] **Day 36-38**: Test coverage push (Partial)
+  - [x] Fix failing backup tests
+  - [x] Add retry package tests (34.1% coverage)
+  - [x] Improve backup coverage to 65.7%
+  - [x] Increase overall coverage from 30.8% to 35.1%
+  - [ ] Reach 60%+ total coverage (blocked: requires extensive work on api/runtime packages)
+  - [ ] Chaos testing
+  - [ ] Security testing
 
 - [ ] **Day 39-40**: Documentation
   - Production deployment guide
@@ -195,7 +198,7 @@
   - Tag and publish v0.2.0-beta
 
 **Deliverables:**
-- ≥60% test coverage
+- Test coverage: 35.1% (improved from 30.8%, target 60% requires more work)
 - Complete documentation
 - Beta release published
 - Upgrade guide
