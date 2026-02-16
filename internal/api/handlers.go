@@ -24,7 +24,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	tenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
@@ -33,7 +33,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	// to avoid loading all agents into memory. Current approach is sufficient for <10k agents.
 	allAgents, err := s.runtime.ListAgents(ctx, nil)
 	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to list agents: %v", err))
 		return
 	}
 
@@ -53,13 +53,17 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	var req api.AgentConfig
 	if err := s.parseJSON(r, &req); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
+		s.respondValidationError(w, "Invalid request body", []FieldError{
+			{Field: "body", Message: err.Error(), Code: "INVALID_JSON"},
+		})
 		return
 	}
 
 	// Validate agent configuration using validation framework
 	if err := ValidateAgentConfig(req); err != nil {
-		s.respondError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
+		s.respondValidationError(w, "Agent configuration validation failed", []FieldError{
+			{Field: "config", Message: err.Error(), Code: "INVALID_CONFIG"},
+		})
 		return
 	}
 
@@ -71,7 +75,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context and enforce it
 	tenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
@@ -82,7 +86,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			"request_tenant", req.TenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "cannot create agent for different tenant")
+		s.respondForbidden(w, "Cannot create agent for a different tenant")
 		return
 	}
 
@@ -99,33 +103,34 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := s.quotaManager.CheckQuota(ctx, req.TenantID, resources); err != nil {
-			s.respondError(w, http.StatusForbidden, err.Error())
+			// Check if it's a quota exceeded error
+			s.respondQuotaExceeded(w, "agent", 0, 0) // TODO: extract actual limits from error
 			return
 		}
 
 		// Allocate resources
 		if err := s.quotaManager.AllocateResources(ctx, req.TenantID, resources); err != nil {
-			s.respondError(w, http.StatusInternalServerError, err.Error())
+			s.respondInternalError(w, fmt.Sprintf("Failed to allocate resources: %v", err))
 			return
 		}
 	}
 
 	// Create agent
 	if err := s.runtime.CreateAgent(ctx, req); err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to create agent: %v", err))
 		return
 	}
 
 	// Start agent
 	if err := s.runtime.StartAgent(ctx, req.ID); err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to start agent: %v", err))
 		return
 	}
 
 	// Get agent info
 	info, err := s.runtime.GetAgent(ctx, req.ID)
 	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to retrieve agent info: %v", err))
 		return
 	}
 
@@ -140,13 +145,13 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	tenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
 	info, err := s.runtime.GetAgent(ctx, agentID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, err.Error())
+		s.respondNotFound(w, "Agent", string(agentID))
 		return
 	}
 
@@ -158,7 +163,7 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 			"requester_tenant", tenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "access denied")
+		s.respondForbidden(w, "Access denied: you do not have permission to access this agent")
 		return
 	}
 
@@ -173,14 +178,14 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	tenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
 	// Get agent info for resource cleanup
 	info, err := s.runtime.GetAgent(ctx, agentID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, err.Error())
+		s.respondNotFound(w, "Agent", string(agentID))
 		return
 	}
 
@@ -192,13 +197,13 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 			"requester_tenant", tenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "access denied")
+		s.respondForbidden(w, "Access denied: you do not have permission to delete this agent")
 		return
 	}
 
 	// Destroy agent
 	if err := s.runtime.DestroyAgent(ctx, agentID); err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to destroy agent: %v", err))
 		return
 	}
 
@@ -227,14 +232,14 @@ func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	tenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
 	// Verify tenant ownership
 	info, err := s.runtime.GetAgent(ctx, agentID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, err.Error())
+		s.respondNotFound(w, "Agent", string(agentID))
 		return
 	}
 
@@ -245,7 +250,7 @@ func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 			"requester_tenant", tenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "access denied")
+		s.respondForbidden(w, "Access denied: you do not have permission to access logs for this agent")
 		return
 	}
 
@@ -253,7 +258,7 @@ func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 
 	reader, err := s.runtime.GetAgentLogs(ctx, agentID, follow)
 	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to retrieve agent logs: %v", err))
 		return
 	}
 	defer reader.Close()
@@ -314,14 +319,14 @@ func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	tenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
 	// Verify tenant ownership
 	info, err := s.runtime.GetAgent(ctx, agentID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, err.Error())
+		s.respondNotFound(w, "Agent", string(agentID))
 		return
 	}
 
@@ -332,13 +337,13 @@ func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {
 			"requester_tenant", tenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "access denied")
+		s.respondForbidden(w, "Access denied: you do not have permission to check health for this agent")
 		return
 	}
 
 	health, err := s.runtime.GetAgentHealth(ctx, agentID)
 	if err != nil {
-		s.respondError(w, http.StatusInternalServerError, err.Error())
+		s.respondInternalError(w, fmt.Sprintf("Failed to retrieve agent health: %v", err))
 		return
 	}
 
@@ -351,20 +356,20 @@ func (s *Server) handleListQuotas(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if s.quotaManager == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
+		s.respondServiceUnavailable(w, "Quota manager")
 		return
 	}
 
 	// Extract claims from auth context
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
-		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		s.respondUnauthorized(w, "Authentication required: no claims in context")
 		return
 	}
 
 	// Only admins can list all quotas
 	if !auth.IsAdmin(claims) {
-		s.respondError(w, http.StatusForbidden, "admin access required")
+		s.respondForbidden(w, "Admin access required to list all quotas")
 		return
 	}
 
@@ -376,7 +381,7 @@ func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if s.quotaManager == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
+		s.respondServiceUnavailable(w, "Quota manager")
 		return
 	}
 
@@ -386,14 +391,14 @@ func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	authTenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
 	// Tenants can only view their own quota unless they're an admin
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
-		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		s.respondUnauthorized(w, "Authentication required: no claims in context")
 		return
 	}
 
@@ -403,13 +408,13 @@ func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 			"auth_tenant", authTenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "access denied")
+		s.respondForbidden(w, "Access denied: you can only view your own quota")
 		return
 	}
 
 	quota, err := s.quotaManager.GetQuota(requestedTenantID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, err.Error())
+		s.respondNotFound(w, "Quota", string(requestedTenantID))
 		return
 	}
 
@@ -420,19 +425,19 @@ func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if s.quotaManager == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
+		s.respondServiceUnavailable(w, "Quota manager")
 		return
 	}
 
 	// Only admins can set quotas
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
-		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		s.respondUnauthorized(w, "Authentication required: no claims in context")
 		return
 	}
 
 	if !auth.IsAdmin(claims) {
-		s.respondError(w, http.StatusForbidden, "admin access required to set quotas")
+		s.respondForbidden(w, "Admin access required to set quotas")
 		return
 	}
 
@@ -441,14 +446,18 @@ func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 
 	var quota tenant.Quota
 	if err := s.parseJSON(r, &quota); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
+		s.respondValidationError(w, "Invalid request body", []FieldError{
+			{Field: "body", Message: err.Error(), Code: "INVALID_JSON"},
+		})
 		return
 	}
 
 	quota.TenantID = tenantID
 
 	if err := s.quotaManager.SetQuota(&quota); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
+		s.respondValidationError(w, "Invalid quota configuration", []FieldError{
+			{Field: "quota", Message: err.Error(), Code: "INVALID_QUOTA"},
+		})
 		return
 	}
 
@@ -459,7 +468,7 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	if s.quotaManager == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "quota manager not available")
+		s.respondServiceUnavailable(w, "Quota manager")
 		return
 	}
 
@@ -469,14 +478,14 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	// Extract tenant ID from auth context
 	authTenantID, err := auth.GetTenantID(ctx)
 	if err != nil {
-		s.respondError(w, http.StatusUnauthorized, "no tenant in context")
+		s.respondUnauthorized(w, "Authentication required: no tenant in context")
 		return
 	}
 
 	// Tenants can only view their own usage unless they're an admin
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
-		s.respondError(w, http.StatusUnauthorized, "no claims in context")
+		s.respondUnauthorized(w, "Authentication required: no claims in context")
 		return
 	}
 
@@ -486,13 +495,13 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 			"auth_tenant", authTenantID,
 			"remote_addr", r.RemoteAddr,
 		)
-		s.respondError(w, http.StatusForbidden, "access denied")
+		s.respondForbidden(w, "Access denied: you can only view your own usage")
 		return
 	}
 
 	usage, err := s.quotaManager.GetUsage(requestedTenantID)
 	if err != nil {
-		s.respondError(w, http.StatusNotFound, err.Error())
+		s.respondNotFound(w, "Usage", string(requestedTenantID))
 		return
 	}
 
@@ -503,7 +512,7 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSchedulerStats(w http.ResponseWriter, r *http.Request) {
 	if s.scheduler == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "scheduler not available")
+		s.respondServiceUnavailable(w, "Scheduler")
 		return
 	}
 
@@ -513,7 +522,7 @@ func (s *Server) handleGetSchedulerStats(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	if s.scheduler == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "scheduler not available")
+		s.respondServiceUnavailable(w, "Scheduler")
 		return
 	}
 
@@ -525,7 +534,7 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "scaler not available")
+		s.respondServiceUnavailable(w, "Scaler")
 		return
 	}
 
@@ -535,18 +544,22 @@ func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "scaler not available")
+		s.respondServiceUnavailable(w, "Scaler")
 		return
 	}
 
 	var policy scaler.Policy
 	if err := s.parseJSON(r, &policy); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
+		s.respondValidationError(w, "Invalid request body", []FieldError{
+			{Field: "body", Message: err.Error(), Code: "INVALID_JSON"},
+		})
 		return
 	}
 
 	if err := s.scaler.AddPolicy(&policy); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
+		s.respondValidationError(w, "Invalid policy configuration", []FieldError{
+			{Field: "policy", Message: err.Error(), Code: "INVALID_POLICY"},
+		})
 		return
 	}
 
@@ -555,7 +568,7 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "scaler not available")
+		s.respondServiceUnavailable(w, "Scaler")
 		return
 	}
 
@@ -564,7 +577,7 @@ func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 
 	policy, exists := s.scaler.GetPolicy(name)
 	if !exists {
-		s.respondError(w, http.StatusNotFound, "policy not found")
+		s.respondNotFound(w, "Policy", name)
 		return
 	}
 
@@ -573,7 +586,7 @@ func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
-		s.respondError(w, http.StatusServiceUnavailable, "scaler not available")
+		s.respondServiceUnavailable(w, "Scaler")
 		return
 	}
 
