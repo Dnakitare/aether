@@ -201,6 +201,10 @@ func (s *Server) setupRoutes() {
 	v1.HandleFunc("/agents/{id}/logs", s.handleGetAgentLogs).Methods("GET")
 	v1.HandleFunc("/agents/{id}/health", s.handleGetAgentHealth).Methods("GET")
 
+	// Bulk operations
+	v1.HandleFunc("/agents/bulk/create", s.handleBulkCreateAgents).Methods("POST")
+	v1.HandleFunc("/agents/bulk/delete", s.handleBulkDeleteAgents).Methods("POST")
+
 	// Quotas
 	v1.HandleFunc("/quotas", s.handleListQuotas).Methods("GET")
 	v1.HandleFunc("/quotas/{tenant_id}", s.handleGetQuota).Methods("GET")
