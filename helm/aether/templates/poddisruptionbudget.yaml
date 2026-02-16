@@ -1,0 +1,14 @@
+{{- if and .Values.apiServer.enabled .Values.apiServer.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "aether.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aether.apiServer.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.apiServer.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "aether.apiServer.selectorLabels" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,106 @@
+{{- if .Values.apiServer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aether.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aether.apiServer.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.apiServer.autoscaling.enabled }}
+  replicas: {{ .Values.apiServer.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "aether.apiServer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.apiServer.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "aether.apiServer.selectorLabels" . | nindent 8 }}
+        {{- with .Values.apiServer.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "aether.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "aether.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.apiServer.securityContext | nindent 8 }}
+      containers:
+        - name: aether-api
+          securityContext:
+            {{- toYaml .Values.apiServer.containerSecurityContext | nindent 12 }}
+          image: {{ include "aether.image" (dict "imageRoot" .Values.apiServer.image "global" .Values.global) }}
+          imagePullPolicy: {{ .Values.apiServer.image.pullPolicy }}
+          command:
+            - /usr/local/bin/aether
+            - server
+            - --config=/etc/aether/config
+          ports:
+            - name: http
+              containerPort: {{ .Values.apiServer.service.targetPort }}
+              protocol: TCP
+          env:
+            # Database password from secret
+            - name: AETHER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aether.postgresql.secretName" . }}
+                  key: password
+            # Redis password from secret (if enabled)
+            {{- if .Values.redis.auth.enabled }}
+            - name: AETHER_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aether.redis.secretName" . }}
+                  key: redis-password
+            {{- end }}
+            {{- with .Values.extraEnvVars }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "aether.fullname" . }}-config
+            {{- if .Values.extraEnvVarsSecret }}
+            - secretRef:
+                name: {{ .Values.extraEnvVarsSecret }}
+            {{- end }}
+            {{- if .Values.extraEnvVarsConfigMap }}
+            - configMapRef:
+                name: {{ .Values.extraEnvVarsConfigMap }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.apiServer.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.apiServer.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.apiServer.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.apiServer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.apiServer.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.apiServer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
