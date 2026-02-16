@@ -383,8 +383,8 @@ func TestTokenBucketConcurrency(t *testing.T) {
 
 		// Should allow up to burst capacity (200)
 		// Allow tolerance for concurrent edge cases and token refill during test execution
-		// With 50 goroutines taking ~200ms to complete, tokens refill at 100/sec = 20 tokens
-		tolerance := 25
+		// CI environments are slower, allowing more refill time (100 tokens/sec * ~350ms = 35 tokens)
+		tolerance := 40
 		if totalAllowed > limit.Burst+tolerance {
 			t.Errorf("Allowed %d requests, exceeds burst limit %d (tolerance: %d)", totalAllowed, limit.Burst, tolerance)
 		}

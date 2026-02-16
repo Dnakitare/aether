@@ -935,9 +935,14 @@ func TestBackupCompression(t *testing.T) {
 
 		db, err := sql.Open("postgres", "postgres://postgres:postgres@localhost:5432/aether_test?sslmode=disable")
 		if err != nil {
-			t.Skip("PostgreSQL not available")
+			t.Skip("PostgreSQL not available:", err)
 		}
 		defer db.Close()
+
+		// Try to ping database
+		if err := db.Ping(); err != nil {
+			t.Skip("PostgreSQL not available (ping failed):", err)
+		}
 
 		mr, _ := miniredis.Run()
 		defer mr.Close()
