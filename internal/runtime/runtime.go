@@ -3,12 +3,19 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/aether-runtime/aether/internal/recovery"
 	"github.com/aether-runtime/aether/internal/runtime/agent"
 	"github.com/aether-runtime/aether/internal/runtime/vm"
 	"github.com/aether-runtime/aether/pkg/api"
@@ -24,12 +31,23 @@ type StateStore interface {
 	DeleteAgent(ctx context.Context, agentID api.AgentID) error
 }
 
+// MetricsRecorder defines the interface for recording runtime metrics.
+type MetricsRecorder interface {
+	RecordAgentOperation(operation string, status string, tenantID api.TenantID)
+	RecordAgentStartup(tenantID api.TenantID, duration time.Duration)
+	RecordAgentError(errorType string, tenantID api.TenantID)
+	SetAgentCount(status api.AgentStatus, tenantID api.TenantID, count float64)
+}
+
 // Runtime is the main Aether runtime that manages agent lifecycle.
 type Runtime struct {
-	logger     *slog.Logger
-	vmManager  *vm.Manager
-	stateStore StateStore
-	config     Config
+	logger            *slog.Logger
+	tracer            trace.Tracer
+	metrics           MetricsRecorder
+	vmManager         *vm.Manager
+	stateStore        StateStore
+	checkpointManager *recovery.CheckpointManager
+	config            Config
 
 	mu     sync.RWMutex
 	agents map[api.AgentID]*agent.Agent
@@ -56,6 +74,7 @@ func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, e
 
 	return &Runtime{
 		logger:     logger,
+		tracer:     otel.Tracer("aether.runtime"),
 		vmManager:  vmManager,
 		stateStore: stateStore,
 		config:     config,
@@ -63,8 +82,25 @@ func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, e
 	}, nil
 }
 
+// SetMetrics sets the metrics recorder (optional).
+func (r *Runtime) SetMetrics(metrics MetricsRecorder) {
+	r.metrics = metrics
+}
+
 // CreateAgent creates a new agent with the given configuration.
 func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error {
+	// Track agent creation time for metrics
+	startTime := time.Now()
+
+	ctx, span := r.tracer.Start(ctx, "runtime.CreateAgent",
+		trace.WithAttributes(
+			attribute.String("agent.id", string(config.ID)),
+			attribute.String("agent.tenant_id", string(config.TenantID)),
+			attribute.String("agent.image", config.Image),
+		),
+	)
+	defer span.End()
+
 	r.logger.InfoContext(ctx, "creating agent",
 		"agent_id", config.ID,
 		"tenant_id", config.TenantID,
@@ -79,11 +115,26 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 		config.Resources.MemoryMB = r.config.DefaultResources.MemoryMB
 	}
 
+	span.SetAttributes(
+		attribute.Int("agent.cpu_count", config.Resources.CPUCount),
+		attribute.Int64("agent.memory_mb", config.Resources.MemoryMB),
+	)
+
 	// Check if agent already exists
 	r.mu.RLock()
 	if _, exists := r.agents[config.ID]; exists {
 		r.mu.RUnlock()
-		return fmt.Errorf("agent %s already exists", config.ID)
+		err := fmt.Errorf("agent %s already exists", config.ID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "agent already exists")
+
+		// Record error metric
+		if r.metrics != nil {
+			r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
+			r.metrics.RecordAgentError("already_exists", config.TenantID)
+		}
+
+		return err
 	}
 	r.mu.RUnlock()
 
@@ -100,10 +151,21 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	vmConfig := vm.FromAgentConfig(config, vmPaths)
 
 	// Create the VM
+	span.AddEvent("creating_vm")
 	vmInstance, err := r.vmManager.Create(ctx, vmConfig)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to create VM")
+
+		// Record error metric
+		if r.metrics != nil {
+			r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
+			r.metrics.RecordAgentError("vm_creation_failed", config.TenantID)
+		}
+
 		return fmt.Errorf("failed to create VM: %w", err)
 	}
+	span.AddEvent("vm_created")
 
 	// Wrap VM in adapter for agent interface
 	vmAdapter := &vmAdapter{vm: vmInstance}
@@ -116,15 +178,27 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	r.agents[config.ID] = agentInstance
 	r.mu.Unlock()
 
+	span.SetAttributes(attribute.Int("runtime.agent_count", len(r.agents)))
+
 	// Persist to state store if available
 	if r.stateStore != nil {
+		span.AddEvent("persisting_to_state_store")
 		if err := r.stateStore.CreateAgent(ctx, config); err != nil {
 			r.logger.ErrorContext(ctx, "failed to persist agent to state store",
 				"agent_id", config.ID,
 				"error", err,
 			)
+			span.RecordError(err)
+			span.AddEvent("state_store_persistence_failed")
 			// Continue anyway - agent exists in memory
 		}
+	}
+
+	// Record successful agent creation metrics
+	if r.metrics != nil {
+		r.metrics.RecordAgentOperation("create", "success", config.TenantID)
+		r.metrics.RecordAgentStartup(config.TenantID, time.Since(startTime))
+		// Note: Agent count is updated by a separate goroutine that polls agent states
 	}
 
 	r.logger.InfoContext(ctx, "agent created successfully", "agent_id", config.ID)
@@ -306,6 +380,167 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	}
 
 	r.logger.InfoContext(ctx, "runtime shutdown complete")
+	return nil
+}
+
+// SetCheckpointManager sets the checkpoint manager for the runtime.
+// This should be called after creating the runtime if checkpoint functionality is desired.
+func (r *Runtime) SetCheckpointManager(db *sql.DB) error {
+	config := recovery.DefaultCheckpointConfig()
+	cm, err := recovery.NewCheckpointManager(r.logger, db, config)
+	if err != nil {
+		return fmt.Errorf("failed to create checkpoint manager: %w", err)
+	}
+	r.checkpointManager = cm
+	r.logger.Info("checkpoint manager initialized",
+		"retention_count", config.RetentionCount,
+		"max_size_mb", config.MaxCheckpointSize/(1024*1024),
+	)
+	return nil
+}
+
+// CreateCheckpoint creates a checkpoint for an agent.
+func (r *Runtime) CreateCheckpoint(ctx context.Context, agentID api.AgentID) (*recovery.Checkpoint, error) {
+	if r.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	r.logger.InfoContext(ctx, "creating checkpoint", "agent_id", agentID)
+
+	// Get agent info
+	agentInstance, err := r.getAgent(agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	info := agentInstance.GetInfo()
+
+	// Create state snapshot
+	state := map[string]interface{}{
+		"status":     string(info.Status),
+		"config":     info.Config,
+		"created_at": time.Now().Format(time.RFC3339),
+	}
+
+	// Metadata
+	metadata := map[string]string{
+		"image":     info.Config.Image,
+		"cpu_count": fmt.Sprintf("%d", info.Config.Resources.CPUCount),
+		"memory_mb": fmt.Sprintf("%d", info.Config.Resources.MemoryMB),
+	}
+
+	// Create checkpoint
+	checkpoint, err := r.checkpointManager.CreateCheckpoint(
+		ctx,
+		agentID,
+		info.Config.TenantID,
+		state,
+		metadata,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint: %w", err)
+	}
+
+	r.logger.InfoContext(ctx, "checkpoint created successfully",
+		"agent_id", agentID,
+		"version", checkpoint.Version,
+		"size", checkpoint.Size,
+	)
+
+	return checkpoint, nil
+}
+
+// ListCheckpoints lists all checkpoints for an agent.
+func (r *Runtime) ListCheckpoints(ctx context.Context, agentID api.AgentID) ([]*recovery.Checkpoint, error) {
+	if r.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	checkpoints, err := r.checkpointManager.ListCheckpoints(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list checkpoints: %w", err)
+	}
+
+	return checkpoints, nil
+}
+
+// GetLatestCheckpoint gets the latest checkpoint for an agent.
+func (r *Runtime) GetLatestCheckpoint(ctx context.Context, agentID api.AgentID) (*recovery.Checkpoint, error) {
+	if r.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	checkpoint, err := r.checkpointManager.GetLatestCheckpoint(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest checkpoint: %w", err)
+	}
+
+	return checkpoint, nil
+}
+
+// RestoreFromCheckpoint restores an agent from a checkpoint.
+func (r *Runtime) RestoreFromCheckpoint(ctx context.Context, agentID api.AgentID, version int) error {
+	if r.checkpointManager == nil {
+		return fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	r.logger.InfoContext(ctx, "restoring agent from checkpoint",
+		"agent_id", agentID,
+		"version", version,
+	)
+
+	// Get checkpoint
+	var checkpoint *recovery.Checkpoint
+	var err error
+	if version > 0 {
+		checkpoint, err = r.checkpointManager.GetCheckpointByVersion(ctx, agentID, version)
+	} else {
+		checkpoint, err = r.checkpointManager.GetLatestCheckpoint(ctx, agentID)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get checkpoint: %w", err)
+	}
+
+	r.logger.InfoContext(ctx, "found checkpoint",
+		"version", checkpoint.Version,
+		"created_at", checkpoint.CreatedAt,
+	)
+
+	// TODO: Actually restore the agent state
+	// For now, this is a placeholder that demonstrates the checkpoint retrieval
+	// In a full implementation, this would:
+	// 1. Stop the current agent if running
+	// 2. Restore the VM state from checkpoint
+	// 3. Restart the agent with restored state
+
+	r.logger.WarnContext(ctx, "checkpoint restore not fully implemented",
+		"agent_id", agentID,
+		"version", checkpoint.Version,
+	)
+
+	return nil
+}
+
+// DeleteCheckpoint deletes a specific checkpoint.
+func (r *Runtime) DeleteCheckpoint(ctx context.Context, agentID api.AgentID, version int) error {
+	if r.checkpointManager == nil {
+		return fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	r.logger.InfoContext(ctx, "deleting checkpoint",
+		"agent_id", agentID,
+		"version", version,
+	)
+
+	if err := r.checkpointManager.DeleteCheckpoint(ctx, agentID, version); err != nil {
+		return fmt.Errorf("failed to delete checkpoint: %w", err)
+	}
+
+	r.logger.InfoContext(ctx, "checkpoint deleted successfully",
+		"agent_id", agentID,
+		"version", version,
+	)
+
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 
@@ -13,6 +14,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
+
+// Queue defines the interface for distributed queue operations.
+// Both DistributedQueue (Kafka-based) and MemoryQueue (in-memory) implement this interface.
+type Queue interface {
+	// RegisterHandler adds a handler for processing scheduling requests
+	RegisterHandler(handler RequestHandler)
+
+	// Enqueue adds a scheduling request to the queue
+	Enqueue(ctx context.Context, req *scheduler.AgentRequest) error
+
+	// Start begins consuming messages from the queue
+	Start(ctx context.Context) error
+
+	// Stop stops the queue consumer
+	Stop(ctx context.Context) error
+
+	// Stats returns queue statistics
+	Stats(ctx context.Context) (*QueueStats, error)
+}
 
 // SchedulingRequest represents a request to schedule an agent.
 type SchedulingRequest struct {
@@ -93,6 +113,42 @@ func DefaultQueueConfig() QueueConfig {
 
 // RequestHandler is a function that processes scheduling requests.
 type RequestHandler func(ctx context.Context, req *SchedulingRequest) error
+
+// NewQueue creates a queue with automatic fallback.
+// It tries to connect to Kafka first. If Kafka is unavailable, it falls back to an in-memory queue.
+// This allows development and testing without requiring Kafka to be running.
+func NewQueue(logger *slog.Logger, config QueueConfig) (Queue, error) {
+	// Try to connect to Kafka first
+	if isKafkaAvailable(config.Brokers) {
+		logger.InfoContext(context.Background(), "Kafka available, using distributed queue",
+			"brokers", config.Brokers,
+		)
+		return NewDistributedQueue(logger, config)
+	}
+
+	// Fall back to in-memory queue
+	logger.WarnContext(context.Background(), "Kafka unavailable, falling back to in-memory queue",
+		"brokers", config.Brokers,
+		"reason", "development/testing mode",
+	)
+	return NewMemoryQueue(logger, config), nil
+}
+
+// isKafkaAvailable checks if Kafka brokers are reachable.
+func isKafkaAvailable(brokers []string) bool {
+	if len(brokers) == 0 {
+		return false
+	}
+
+	// Try to connect to the first broker
+	timeout := 2 * time.Second
+	conn, err := net.DialTimeout("tcp", brokers[0], timeout)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
 
 // NewDistributedQueue creates a new distributed queue.
 func NewDistributedQueue(logger *slog.Logger, config QueueConfig) (*DistributedQueue, error) {

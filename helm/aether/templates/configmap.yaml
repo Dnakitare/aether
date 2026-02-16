@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aether.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aether.labels" . | nindent 4 }}
+data:
+  # API server configuration
+  AETHER_API_ADDRESS: {{ .Values.config.apiAddress | quote }}
+  AETHER_ENABLE_AUTH: {{ .Values.config.enableAuth | quote }}
+  AETHER_ENABLE_CORS: {{ .Values.config.enableCORS | quote }}
+
+  # Database configuration
+  AETHER_DB_HOST: {{ include "aether.postgresql.host" . | quote }}
+  AETHER_DB_PORT: {{ include "aether.postgresql.port" . | quote }}
+  AETHER_DB_NAME: {{ include "aether.postgresql.database" . | quote }}
+
+  # Redis configuration
+  AETHER_REDIS_HOST: {{ include "aether.redis.host" . | quote }}
+  AETHER_REDIS_PORT: {{ include "aether.redis.port" . | quote }}
+
+  # Logging configuration
+  AETHER_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  AETHER_LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+
+  {{- if .Values.config.tracing.enabled }}
+  # Tracing configuration
+  AETHER_TRACING_ENABLED: "true"
+  {{- if .Values.config.tracing.endpoint }}
+  AETHER_TRACING_ENDPOINT: {{ .Values.config.tracing.endpoint | quote }}
+  {{- end }}
+  AETHER_TRACING_SERVICE_NAME: {{ .Values.config.tracing.serviceName | quote }}
+  {{- end }}

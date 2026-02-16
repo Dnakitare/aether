@@ -1,0 +1,346 @@
+# Default values for Aether Runtime Helm chart
+
+# Global settings
+global:
+  # Image registry (can be overridden per component)
+  imageRegistry: ""
+  # Image pull secrets for private registries
+  imagePullSecrets: []
+  # Storage class for persistent volumes
+  storageClass: ""
+
+# Aether API Server configuration
+apiServer:
+  # Enable API server deployment
+  enabled: true
+
+  # Number of replicas
+  replicaCount: 2
+
+  image:
+    registry: ghcr.io
+    repository: aether-runtime/aether
+    tag: "0.2.0-beta"
+    pullPolicy: IfNotPresent
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    annotations: {}
+
+  # Resource requests and limits
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2048Mi
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /readiness
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 3
+
+  # Auto-scaling configuration
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Pod disruption budget
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity rules
+  affinity: {}
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Pod labels
+  podLabels: {}
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  # Container security context
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
+# Aether Scheduler configuration
+scheduler:
+  # Enable scheduler StatefulSet
+  enabled: true
+
+  # Number of replicas (1 for leader election)
+  replicaCount: 1
+
+  image:
+    registry: ghcr.io
+    repository: aether-runtime/aether
+    tag: "0.2.0-beta"
+    pullPolicy: IfNotPresent
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9090
+    targetPort: 9090
+
+  # Resource requests and limits
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1024Mi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+  # Persistent volume for scheduler state
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+    # storageClass: ""
+
+  # Node selector
+  nodeSelector: {}
+
+  # Tolerations
+  tolerations: []
+
+  # Affinity rules
+  affinity: {}
+
+  # Pod annotations
+  podAnnotations: {}
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+# PostgreSQL configuration
+postgresql:
+  # Enable PostgreSQL deployment (set to false to use external database)
+  enabled: true
+
+  # External PostgreSQL configuration (when enabled: false)
+  external:
+    host: ""
+    port: 5432
+    database: aether
+    username: aether
+    # Password should be provided via secret
+    existingSecret: ""
+    existingSecretPasswordKey: password
+
+  # Built-in PostgreSQL (when enabled: true)
+  # Using Bitnami PostgreSQL chart
+  auth:
+    username: aether
+    password: ""  # Auto-generated if empty
+    database: aether
+    existingSecret: ""
+
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: ""
+
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2048Mi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+# Redis configuration
+redis:
+  # Enable Redis deployment (set to false to use external Redis)
+  enabled: true
+
+  # External Redis configuration (when enabled: false)
+  external:
+    host: ""
+    port: 6379
+    password: ""
+    existingSecret: ""
+    existingSecretPasswordKey: password
+
+  # Built-in Redis (when enabled: true)
+  # Using Bitnami Redis chart
+  auth:
+    enabled: true
+    password: ""  # Auto-generated if empty
+    existingSecret: ""
+
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: ""
+
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: aether.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: aether-tls
+      hosts:
+        - aether.example.com
+
+# Service Account
+serviceAccount:
+  # Create service account
+  create: true
+  # Annotations for service account
+  annotations: {}
+  # Name of service account (generated if empty)
+  name: ""
+
+# RBAC configuration
+rbac:
+  # Create RBAC resources
+  create: true
+
+# Network Policy
+networkPolicy:
+  # Enable network policies
+  enabled: false
+  # Policy type
+  policyTypes:
+    - Ingress
+    - Egress
+  # Ingress rules
+  ingress:
+    - from:
+        - podSelector: {}
+  # Egress rules
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53  # DNS
+
+# Monitoring and observability
+monitoring:
+  # Enable Prometheus ServiceMonitor
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+  # Enable Grafana dashboards
+  grafanaDashboards:
+    enabled: false
+
+# Configuration
+config:
+  # Aether configuration as environment variables
+  # Database connection (uses postgresql settings)
+  # Redis connection (uses redis settings)
+
+  # API server configuration
+  apiAddress: ":8080"
+  enableAuth: true
+  enableCORS: false
+
+  # Tracing configuration
+  tracing:
+    enabled: true
+    endpoint: ""  # OTLP endpoint
+    serviceName: aether
+
+  # Logging configuration
+  logLevel: info
+  logFormat: json
+
+# Extra environment variables
+extraEnvVars: []
+# - name: CUSTOM_VAR
+#   value: "custom_value"
+
+# Extra environment variables from secrets/configmaps
+extraEnvVarsSecret: ""
+extraEnvVarsConfigMap: ""
+
+# Extra volumes
+extraVolumes: []
+# - name: extra-volume
+#   emptyDir: {}
+
+# Extra volume mounts
+extraVolumeMounts: []
+# - name: extra-volume
+#   mountPath: /extra
+
+# Init containers
+initContainers: []
+
+# Sidecar containers
+sidecars: []

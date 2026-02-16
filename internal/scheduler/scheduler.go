@@ -8,13 +8,26 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/aether-runtime/aether/pkg/api"
 )
 
+// MetricsRecorder defines the interface for recording scheduler metrics.
+type MetricsRecorder interface {
+	RecordSchedulingDuration(strategy string, tenantID api.TenantID, duration time.Duration)
+	RecordSchedulingError(reason string, tenantID api.TenantID)
+}
+
 // Scheduler manages agent scheduling and placement.
 type Scheduler struct {
-	logger *slog.Logger
-	mu     sync.RWMutex
+	logger  *slog.Logger
+	tracer  trace.Tracer
+	metrics MetricsRecorder
+	mu      sync.RWMutex
 
 	// Queue for pending agent requests
 	queue *Queue
@@ -67,6 +80,7 @@ func New(logger *slog.Logger, config Config) *Scheduler {
 
 	return &Scheduler{
 		logger:   logger.With("component", "scheduler"),
+		tracer:   otel.Tracer("aether.scheduler"),
 		queue:    NewQueue(),
 		placer:   NewPlacer(config.Strategy),
 		nodes:    make(map[string]*Node),
@@ -74,6 +88,11 @@ func New(logger *slog.Logger, config Config) *Scheduler {
 		stopCh:   make(chan struct{}),
 		interval: config.Interval,
 	}
+}
+
+// SetMetrics sets the metrics recorder (optional).
+func (s *Scheduler) SetMetrics(metrics MetricsRecorder) {
+	s.metrics = metrics
 }
 
 // Start begins the scheduling loop.
@@ -109,6 +128,16 @@ func (s *Scheduler) Events() <-chan ScheduleEvent {
 
 // ScheduleAgent adds an agent to the scheduling queue.
 func (s *Scheduler) ScheduleAgent(ctx context.Context, req *AgentRequest) error {
+	ctx, span := s.tracer.Start(ctx, "scheduler.ScheduleAgent",
+		trace.WithAttributes(
+			attribute.String("agent.id", string(req.Config.ID)),
+			attribute.String("agent.tenant_id", string(req.Config.TenantID)),
+			attribute.Int64("agent.cpu_cores", req.Resources.CPUCores),
+			attribute.Int64("agent.memory_mb", req.Resources.MemoryMB),
+		),
+	)
+	defer span.End()
+
 	s.logger.InfoContext(ctx,
 		"queuing agent for scheduling",
 		"agent_id", req.Config.ID,
@@ -118,6 +147,7 @@ func (s *Scheduler) ScheduleAgent(ctx context.Context, req *AgentRequest) error 
 	)
 
 	s.queue.Enqueue(req)
+	span.SetAttributes(attribute.Int("queue.length", s.queue.Len()))
 	return nil
 }
 
@@ -213,6 +243,17 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		return // Queue is empty
 	}
 
+	// Track scheduling duration
+	startTime := time.Now()
+
+	ctx, span := s.tracer.Start(ctx, "scheduler.scheduleNext",
+		trace.WithAttributes(
+			attribute.String("agent.id", string(req.Config.ID)),
+			attribute.Int("queue.length", s.queue.Len()),
+		),
+	)
+	defer span.End()
+
 	// Lock for the entire check-and-allocate operation to prevent race conditions
 	// This ensures no other goroutine can allocate resources between our check and allocation
 	s.mu.Lock()
@@ -222,11 +263,21 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 	for _, node := range s.nodes {
 		nodeList = append(nodeList, node)
 	}
+	span.SetAttributes(attribute.Int("nodes.available", len(nodeList)))
 
 	// Try to find a suitable node
 	node, err := s.placer.SelectNode(req, nodeList)
 	if err != nil {
 		// No suitable node found - leave in queue and try again later
+		span.SetStatus(codes.Error, "no suitable node found")
+		span.RecordError(err)
+
+		// Record scheduling error metric
+		if s.metrics != nil {
+			s.metrics.RecordSchedulingError("no_suitable_node", req.Config.TenantID)
+			s.metrics.RecordSchedulingDuration(string(s.placer.strategy), req.Config.TenantID, time.Since(startTime))
+		}
+
 		s.logger.DebugContext(ctx,
 			"no suitable node found for agent",
 			"agent_id", req.Config.ID,
@@ -243,9 +294,23 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 		return
 	}
 
+	span.SetAttributes(
+		attribute.String("node.id", node.ID),
+		attribute.Float64("node.utilization_before", node.UtilizationPercent()),
+	)
+
 	// Verify node can still fit (double-check under lock to prevent race conditions)
 	if !node.CanFit(req.Resources) {
 		// Node capacity changed between selection and now, retry later
+		span.SetStatus(codes.Error, "node capacity changed")
+		span.AddEvent("node_capacity_changed")
+
+		// Record scheduling error metric
+		if s.metrics != nil {
+			s.metrics.RecordSchedulingError("node_capacity_changed", req.Config.TenantID)
+			s.metrics.RecordSchedulingDuration(string(s.placer.strategy), req.Config.TenantID, time.Since(startTime))
+		}
+
 		s.logger.DebugContext(ctx,
 			"node capacity changed, agent no longer fits",
 			"agent_id", req.Config.ID,
@@ -266,6 +331,16 @@ func (s *Scheduler) scheduleNext(ctx context.Context) {
 
 	// Remove from queue (successfully scheduled)
 	s.queue.Dequeue()
+
+	// Record successful scheduling metric
+	if s.metrics != nil {
+		s.metrics.RecordSchedulingDuration(string(s.placer.strategy), req.Config.TenantID, time.Since(startTime))
+	}
+
+	span.SetAttributes(
+		attribute.Bool("success", true),
+		attribute.Float64("node.utilization_after", node.UtilizationPercent()),
+	)
 
 	s.logger.InfoContext(ctx,
 		"scheduled agent",

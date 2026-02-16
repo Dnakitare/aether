@@ -1,0 +1,168 @@
+# Docker Compose for Aether Runtime
+# Complete local development environment with all dependencies
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose logs -f aether # Follow logs
+#   docker-compose down           # Stop all services
+#   docker-compose down -v        # Stop and remove volumes
+
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: aether-postgres
+    environment:
+      POSTGRES_DB: aether
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: aether_dev_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aether-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: aether-redis
+    command: redis-server --appendonly yes --requirepass aether_dev_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - aether-network
+
+  # Jaeger (Distributed Tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:1.51
+    container_name: aether-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    networks:
+      - aether-network
+
+  # Prometheus (Metrics)
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: aether-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployments/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - aether-network
+    depends_on:
+      - aether
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: aether-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deployments/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deployments/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - aether-network
+    depends_on:
+      - prometheus
+
+  # Aether Runtime
+  aether:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        VERSION: 0.2.0-beta
+        BUILD_DATE: ${BUILD_DATE:-2026-02-15}
+        COMMIT_SHA: ${COMMIT_SHA:-local}
+    container_name: aether-runtime
+    environment:
+      # API Configuration
+      AETHER_API_ADDRESS: ":8080"
+      AETHER_ENABLE_AUTH: "false"  # Disabled for local dev
+      AETHER_ENABLE_CORS: "true"
+
+      # Database Configuration
+      AETHER_DB_HOST: postgres
+      AETHER_DB_PORT: "5432"
+      AETHER_DB_NAME: aether
+      AETHER_DB_USER: aether
+      AETHER_DB_PASSWORD: aether_dev_password
+
+      # Redis Configuration
+      AETHER_REDIS_HOST: redis
+      AETHER_REDIS_PORT: "6379"
+      AETHER_REDIS_PASSWORD: aether_dev_password
+
+      # Tracing Configuration
+      AETHER_TRACING_ENABLED: "true"
+      AETHER_TRACING_ENDPOINT: "http://jaeger:4318"
+      AETHER_TRACING_SERVICE_NAME: aether
+
+      # Logging
+      AETHER_LOG_LEVEL: debug
+      AETHER_LOG_FORMAT: json
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/aether", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - aether-network
+    restart: unless-stopped
+
+networks:
+  aether-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

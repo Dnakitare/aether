@@ -62,7 +62,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	var (
 		shardManager *distributed.ShardManager
 		nodeRegistry *distributed.NodeRegistry
-		queue        *distributed.DistributedQueue
+		queue        distributed.Queue
 	)
 
 	if cfg.Scheduler.Mode == "distributed" {
@@ -112,7 +112,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 		logger.InfoContext(ctx, "node registry initialized")
 
-		// Create distributed queue
+		// Create distributed queue (with automatic fallback to in-memory if Kafka unavailable)
 		queueConfig := distributed.QueueConfig{
 			Brokers:           cfg.Kafka.Brokers,
 			Topic:             cfg.Kafka.Topic,
@@ -124,9 +124,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 			PartitionStrategy: cfg.Kafka.PartitionStrategy,
 		}
 
-		queue, err = distributed.NewDistributedQueue(logger, queueConfig)
+		queue, err = distributed.NewQueue(logger, queueConfig)
 		if err != nil {
-			return fmt.Errorf("failed to create distributed queue: %w", err)
+			return fmt.Errorf("failed to create queue: %w", err)
 		}
 		defer queue.Stop(ctx)
 

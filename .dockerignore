@@ -57,18 +57,29 @@ secrets/
 # Deployment
 deployments/
 !deployments/docker/Dockerfile
+terraform/
+helm/
 
 # Kubernetes
 k8s/
 *.yaml
 *.yml
 !docker-compose.yml
+!docker-compose.*.yml
 
 # Terraform
 *.tfstate
 *.tfstate.*
 .terraform/
 *.tfvars
+
+# Beta and roadmap docs
+BETA_ROADMAP.md
+ALPHA_*.md
+
+# Scripts and tools
+scripts/
+Makefile
 
 # Logs
 *.log

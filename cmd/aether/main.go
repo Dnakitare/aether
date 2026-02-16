@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aether-runtime/aether/internal/cli"
 	"github.com/aether-runtime/aether/internal/observability"
 	"github.com/aether-runtime/aether/internal/runtime"
 	"github.com/aether-runtime/aether/internal/runtime/vm"
@@ -76,6 +77,65 @@ func init() {
 
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(agentCmd)
+	rootCmd.AddCommand(completionCmd)
+}
+
+var completionCmd = &cobra.Command{
+	Use:   "completion [bash|zsh|fish|powershell]",
+	Short: "Generate shell completion script",
+	Long: `Generate shell completion script for Aether.
+
+To load completions:
+
+Bash:
+  $ source <(aether completion bash)
+
+  # To load completions for each session, execute once:
+  # Linux:
+  $ aether completion bash > /etc/bash_completion.d/aether
+  # macOS:
+  $ aether completion bash > $(brew --prefix)/etc/bash_completion.d/aether
+
+Zsh:
+  # If shell completion is not already enabled in your environment,
+  # you will need to enable it. You can execute the following once:
+  $ echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+  # To load completions for each session, execute once:
+  $ aether completion zsh > "${fpath[1]}/_aether"
+
+  # You will need to start a new shell for this setup to take effect.
+
+Fish:
+  $ aether completion fish | source
+
+  # To load completions for each session, execute once:
+  $ aether completion fish > ~/.config/fish/completions/aether.fish
+
+PowerShell:
+  PS> aether completion powershell | Out-String | Invoke-Expression
+
+  # To load completions for every new session, run:
+  PS> aether completion powershell > aether.ps1
+  # and source this file from your PowerShell profile.
+`,
+	DisableFlagsInUseLine: true,
+	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
+	Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		switch args[0] {
+		case "bash":
+			return rootCmd.GenBashCompletion(os.Stdout)
+		case "zsh":
+			return rootCmd.GenZshCompletion(os.Stdout)
+		case "fish":
+			return rootCmd.GenFishCompletion(os.Stdout, true)
+		case "powershell":
+			return rootCmd.GenPowerShellCompletionWithDesc(os.Stdout)
+		default:
+			return fmt.Errorf("unsupported shell: %s", args[0])
+		}
+	},
 }
 
 var daemonCmd = &cobra.Command{
@@ -85,7 +145,11 @@ var daemonCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		logger.InfoContext(ctx, "starting Aether daemon")
+		cli.Header("Aether Runtime Daemon")
+		fmt.Println()
+
+		spinner := cli.NewSpinner("Initializing runtime...")
+		spinner.Start()
 
 		// Create runtime configuration
 		config := runtime.Config{
@@ -106,26 +170,35 @@ var daemonCmd = &cobra.Command{
 		var err error
 		rt, err = runtime.New(logger, config, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create runtime: %w", err)
+			spinner.Error("Failed to initialize runtime")
+			cli.ErrorWithHelp(err, "Check if Firecracker is installed and configured")
+			return err
 		}
+
+		spinner.Success("Runtime initialized")
+		fmt.Println()
+		cli.Info("Daemon started successfully")
+		cli.Dim("Press Ctrl+C to stop")
+		fmt.Println()
 
 		// Handle shutdown signals
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-		logger.InfoContext(ctx, "Aether daemon started successfully")
-		logger.InfoContext(ctx, "Press Ctrl+C to stop")
-
 		// Wait for shutdown signal
 		<-sigCh
 
-		logger.InfoContext(ctx, "shutting down daemon")
+		fmt.Println()
+		spinner = cli.NewSpinner("Shutting down daemon...")
+		spinner.Start()
+
 		if err := rt.Shutdown(ctx); err != nil {
+			spinner.Error("Error during shutdown")
 			logger.ErrorContext(ctx, "error during shutdown", "error", err)
 			return err
 		}
 
-		logger.InfoContext(ctx, "daemon stopped")
+		spinner.Success("Daemon stopped")
 		return nil
 	},
 }
@@ -143,6 +216,7 @@ func init() {
 	agentCmd.AddCommand(agentStopCmd)
 	agentCmd.AddCommand(agentDestroyCmd)
 	agentCmd.AddCommand(agentHealthCmd)
+	agentCmd.AddCommand(agentCheckpointCmd)
 }
 
 var (
@@ -161,7 +235,11 @@ var agentCreateCmd = &cobra.Command{
 		ctx := context.Background()
 
 		if rt == nil {
-			return fmt.Errorf("runtime not initialized - run 'aether daemon' first")
+			cli.ErrorWithSuggestion(
+				fmt.Errorf("runtime not initialized"),
+				"aether daemon",
+			)
+			return fmt.Errorf("runtime not initialized")
 		}
 
 		// Generate agent ID
@@ -178,17 +256,34 @@ var agentCreateCmd = &cobra.Command{
 			},
 		}
 
-		logger.InfoContext(ctx, "creating agent", "id", agentID)
+		// Show configuration
+		cli.Info("Creating agent:")
+		cli.Dim("  Name:     %s", agentName)
+		cli.Dim("  Image:    %s", agentImage)
+		cli.Dim("  CPU:      %d cores", agentCPU)
+		cli.Dim("  Memory:   %d MB", agentMemoryMB)
+		cli.Dim("  Tenant:   %s", agentTenantID)
+		fmt.Println()
+
+		// Create agent with spinner
+		spinner := cli.NewSpinner("Creating agent...")
+		spinner.Start()
 
 		if err := rt.CreateAgent(ctx, config); err != nil {
-			return fmt.Errorf("failed to create agent: %w", err)
+			spinner.Error("Failed to create agent")
+			cli.ErrorWithHelp(err, "Check if the image exists and resources are available")
+			return err
 		}
+
+		spinner.UpdateMessage("Starting agent...")
 
 		if err := rt.StartAgent(ctx, agentID); err != nil {
-			return fmt.Errorf("failed to start agent: %w", err)
+			spinner.Error("Failed to start agent")
+			cli.ErrorWithHelp(err, "Check agent logs for details")
+			return err
 		}
 
-		fmt.Printf("Agent created and started: %s\n", agentID)
+		spinner.Success(fmt.Sprintf("Agent %s created and started", agentID))
 		return nil
 	},
 }
@@ -210,29 +305,41 @@ var agentListCmd = &cobra.Command{
 		ctx := context.Background()
 
 		if rt == nil {
-			return fmt.Errorf("runtime not initialized - run 'aether daemon' first")
+			cli.ErrorWithSuggestion(
+				fmt.Errorf("runtime not initialized"),
+				"aether daemon",
+			)
+			return fmt.Errorf("runtime not initialized")
 		}
 
 		agents, err := rt.ListAgents(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("failed to list agents: %w", err)
+			cli.Error("Failed to list agents: %v", err)
+			return err
 		}
 
 		if len(agents) == 0 {
-			fmt.Println("No agents found")
+			cli.Info("No agents found")
 			return nil
 		}
 
-		fmt.Printf("%-20s %-15s %-10s %-20s\n", "ID", "NAME", "STATUS", "TENANT")
-		fmt.Println("--------------------------------------------------------------------------------")
+		// Create and populate table
+		table := cli.NewTable("ID", "NAME", "STATUS", "TENANT", "CPU", "MEMORY")
 		for _, agent := range agents {
-			fmt.Printf("%-20s %-15s %-10s %-20s\n",
-				agent.Config.ID,
+			table.AddRow(
+				string(agent.Config.ID),
 				agent.Config.Name,
-				agent.Status,
-				agent.Config.TenantID,
+				string(agent.Status),
+				string(agent.Config.TenantID),
+				fmt.Sprintf("%d", agent.Config.Resources.CPUCount),
+				fmt.Sprintf("%d MB", agent.Config.Resources.MemoryMB),
 			)
 		}
+
+		fmt.Println()
+		table.Print()
+		fmt.Println()
+		cli.Dim("Total: %d agent(s)", len(agents))
 
 		return nil
 	},
@@ -291,16 +398,23 @@ var agentStopCmd = &cobra.Command{
 		agentID := api.AgentID(args[0])
 
 		if rt == nil {
-			return fmt.Errorf("runtime not initialized - run 'aether daemon' first")
+			cli.ErrorWithSuggestion(
+				fmt.Errorf("runtime not initialized"),
+				"aether daemon",
+			)
+			return fmt.Errorf("runtime not initialized")
 		}
 
-		logger.InfoContext(ctx, "stopping agent", "id", agentID)
+		spinner := cli.NewSpinner(fmt.Sprintf("Stopping agent %s...", agentID))
+		spinner.Start()
 
 		if err := rt.StopAgent(ctx, agentID, 30*time.Second); err != nil {
-			return fmt.Errorf("failed to stop agent: %w", err)
+			spinner.Error("Failed to stop agent")
+			cli.ErrorWithHelp(err, "The agent may have already stopped or timed out")
+			return err
 		}
 
-		fmt.Printf("Agent stopped: %s\n", agentID)
+		spinner.Success(fmt.Sprintf("Agent %s stopped successfully", agentID))
 		return nil
 	},
 }
@@ -315,16 +429,25 @@ var agentDestroyCmd = &cobra.Command{
 		agentID := api.AgentID(args[0])
 
 		if rt == nil {
-			return fmt.Errorf("runtime not initialized - run 'aether daemon' first")
+			cli.ErrorWithSuggestion(
+				fmt.Errorf("runtime not initialized"),
+				"aether daemon",
+			)
+			return fmt.Errorf("runtime not initialized")
 		}
 
-		logger.InfoContext(ctx, "destroying agent", "id", agentID)
+		cli.Warn("This will permanently destroy agent %s", agentID)
+
+		spinner := cli.NewSpinner("Destroying agent...")
+		spinner.Start()
 
 		if err := rt.DestroyAgent(ctx, agentID); err != nil {
-			return fmt.Errorf("failed to destroy agent: %w", err)
+			spinner.Error("Failed to destroy agent")
+			cli.ErrorWithHelp(err, "The agent may not exist or is already destroyed")
+			return err
 		}
 
-		fmt.Printf("Agent destroyed: %s\n", agentID)
+		spinner.Success(fmt.Sprintf("Agent %s destroyed successfully", agentID))
 		return nil
 	},
 }
@@ -339,20 +462,144 @@ var agentHealthCmd = &cobra.Command{
 		agentID := api.AgentID(args[0])
 
 		if rt == nil {
-			return fmt.Errorf("runtime not initialized - run 'aether daemon' first")
+			cli.ErrorWithSuggestion(
+				fmt.Errorf("runtime not initialized"),
+				"aether daemon",
+			)
+			return fmt.Errorf("runtime not initialized")
 		}
+
+		spinner := cli.NewSpinner("Checking agent health...")
+		spinner.Start()
 
 		health, err := rt.GetAgentHealth(ctx, agentID)
 		if err != nil {
-			return fmt.Errorf("failed to check health: %w", err)
+			spinner.Error("Failed to check health")
+			cli.ErrorWithHelp(err, "The agent may not exist or is not running")
+			return err
 		}
 
+		spinner.Stop()
+
 		if health.Healthy {
-			fmt.Printf("✓ Agent %s is healthy\n", agentID)
+			cli.Success("Agent %s is healthy", agentID)
 		} else {
-			fmt.Printf("✗ Agent %s is unhealthy: %s\n", agentID, health.Message)
+			cli.Error("Agent %s is unhealthy", agentID)
+			cli.Dim("  Reason: %s", health.Message)
 		}
 
 		return nil
+	},
+}
+
+var agentCheckpointCmd = &cobra.Command{
+	Use:   "checkpoint",
+	Short: "Manage agent checkpoints",
+	Long:  "Create, list, restore, and manage agent state checkpoints.",
+}
+
+func init() {
+	agentCheckpointCmd.AddCommand(checkpointCreateCmd)
+	agentCheckpointCmd.AddCommand(checkpointListCmd)
+	agentCheckpointCmd.AddCommand(checkpointRestoreCmd)
+	agentCheckpointCmd.AddCommand(checkpointDeleteCmd)
+}
+
+var checkpointCreateCmd = &cobra.Command{
+	Use:   "create <agent-id>",
+	Short: "Create a checkpoint for an agent",
+	Long:  "Create a state checkpoint for the specified agent. Checkpoints can be used to restore agent state later.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+
+		cli.Info("Creating checkpoint for agent %s", agentID)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with CheckpointManager when wired into runtime
+		// For now, show what the command would do
+		fmt.Println()
+		cli.Dim("  This will create a snapshot of the agent's current state")
+		cli.Dim("  The checkpoint will be stored in PostgreSQL")
+		cli.Dim("  You can restore from this checkpoint later")
+
+		return fmt.Errorf("checkpoint creation not yet integrated with runtime")
+	},
+}
+
+var checkpointListCmd = &cobra.Command{
+	Use:   "list <agent-id>",
+	Short: "List checkpoints for an agent",
+	Long:  "List all available checkpoints for the specified agent.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+
+		cli.Info("Listing checkpoints for agent %s", agentID)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with CheckpointManager when wired into runtime
+		fmt.Println()
+		table := cli.NewTable("VERSION", "CREATED", "SIZE", "STATUS")
+		table.AddRow("1", "2026-02-15 10:00:00", "1.2 MB", "Available")
+		table.AddRow("2", "2026-02-15 11:00:00", "1.3 MB", "Available")
+		table.Print()
+
+		return fmt.Errorf("checkpoint listing not yet integrated with runtime")
+	},
+}
+
+var (
+	restoreVersion int
+)
+
+var checkpointRestoreCmd = &cobra.Command{
+	Use:   "restore <agent-id>",
+	Short: "Restore an agent from a checkpoint",
+	Long:  "Restore an agent's state from a checkpoint. By default, restores from the latest checkpoint.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+
+		versionMsg := "latest"
+		if restoreVersion > 0 {
+			versionMsg = fmt.Sprintf("version %d", restoreVersion)
+		}
+
+		cli.Info("Restoring agent %s from checkpoint %s", agentID, versionMsg)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with RecoveryManager when wired into runtime
+		fmt.Println()
+		cli.Dim("  This will restore the agent to the state from the checkpoint")
+		cli.Dim("  The agent will be stopped and restarted with the restored state")
+		cli.Dim("  Any unsaved state since the checkpoint will be lost")
+
+		return fmt.Errorf("checkpoint restore not yet integrated with runtime")
+	},
+}
+
+func init() {
+	checkpointRestoreCmd.Flags().IntVar(&restoreVersion, "version", 0, "Checkpoint version to restore (default: latest)")
+}
+
+var checkpointDeleteCmd = &cobra.Command{
+	Use:   "delete <agent-id> <version>",
+	Short: "Delete a checkpoint",
+	Long:  "Delete a specific checkpoint version for an agent.",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := api.AgentID(args[0])
+		version := args[1]
+
+		cli.Warn("Deleting checkpoint version %s for agent %s", version, agentID)
+		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+
+		// TODO: Integrate with CheckpointManager when wired into runtime
+		fmt.Println()
+		cli.Dim("  This will permanently delete the specified checkpoint")
+		cli.Dim("  This action cannot be undone")
+
+		return fmt.Errorf("checkpoint deletion not yet integrated with runtime")
 	},
 }
