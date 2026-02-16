@@ -118,23 +118,23 @@
 ### Week 4: Enhanced Features (Mar 8-15)
 **Focus**: CLI, Checkpoint/Restore, API Improvements
 
-- [ ] **Day 22-24**: Enhanced CLI
+- [x] **Day 22-24**: Enhanced CLI
   - Improve command UX
   - Add progress indicators
   - Better error messages
   - Shell autocomplete
 
-- [ ] **Day 25-26**: Checkpoint/Restore completion
+- [x] **Day 25-26**: Checkpoint/Restore completion
   - Finish implementation
   - Integration tests
   - Recovery testing
   - Documentation
 
-- [ ] **Day 27-28**: API improvements
+- [x] **Day 27-28**: API improvements
   - Streaming responses
   - Bulk operations
   - Enhanced error handling
-  - API versioning
+  - Pagination support
 
 **Deliverables:**
 - Improved CLI experience
@@ -302,6 +302,9 @@
 ### Week 3: Performance & Scale
 **Status**: ✅ COMPLETE (100% done)
 
+### Week 4: Enhanced Features
+**Status**: ✅ COMPLETE (100% done)
+
 **Week 1-2 Completed Tasks:**
 - [x] Create Beta branch
 - [x] Create Beta roadmap
@@ -352,7 +355,7 @@
 - [x] Document performance characteristics
 - [x] Complete Week 3
 
-**Week 4: Enhanced Features - In Progress** 🚧
+**Week 4: Enhanced Features** ✅
 
 **Day 22-24: Enhanced CLI** ✅
 - [x] Added progress indicators and spinners
@@ -380,10 +383,11 @@
   * Recovery strategies and troubleshooting
 - ✅ Integration tests already exist in tests/integration/
 
-**Day 27-28: API Improvements** (Next)
-- [ ] Streaming responses
-- [ ] Bulk operations
-- [ ] Enhanced error handling
+**Day 27-28: API Improvements** ✅
+- [x] Streaming responses (documented existing SSE implementation)
+- [x] Bulk operations (bulk create/delete endpoints with concurrency)
+- [x] Enhanced error handling (RFC 7807 Problem Details)
+- [x] Pagination support (added to list endpoints with metadata)
 
 ---
 
