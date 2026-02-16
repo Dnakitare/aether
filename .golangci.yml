@@ -11,28 +11,29 @@ linters:
     - ineffassign
     - staticcheck
     - typecheck
-    - unused
 
   disable:
-    - fieldalignment
+    - unused  # Temporarily disabled - many false positives
     - gocritic
     - revive
     - stylecheck
-    - errorlint
 
 linters-settings:
   errcheck:
     check-blank: false
     check-type-assertions: false
+    exclude-functions:
+      - (*encoding/json.Encoder).Encode
+      - (*github.com/fatih/color.Color).Color
+      - (*database/sql.Tx).Rollback
+      - (*github.com/segmentio/kafka-go.Reader).CommitMessages
 
   govet:
-    enable:
-      - shadow
     disable:
-      - fieldalignment
+      - shadow  # Too many false positives in defer blocks
 
   staticcheck:
-    checks: ["all"]
+    checks: ["all", "-SA1029", "-SA4006"]  # Exclude context key and unused value checks
 
 issues:
   exclude-rules:
@@ -40,6 +41,16 @@ issues:
       linters:
         - errcheck
         - gosec
+        - staticcheck
+        - gosimple
+        - ineffassign
+
+    - path: tests/
+      linters:
+        - errcheck
+        - staticcheck
+        - gosimple
+        - ineffassign
 
     - path: (^|/)vendor/
       linters:

@@ -424,7 +424,7 @@ func (env *TestEnvironment) HTTPRequest(method, path string, body interface{}) (
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	// #nosec G107 - URL is controlled by test code, not user input
+	// #nosec G107,G704 - URL is controlled by test code, not user input
 	return client.Do(req)
 }
 

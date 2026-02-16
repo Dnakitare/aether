@@ -156,6 +156,13 @@ jobs:
             sleep 2
           done
 
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgres://aether:aether_test_pass@localhost:5432/aether_test?sslmode=disable
+        run: |
+          echo "Running database migrations..."
+          go run deployments/docker/run_migrations.go
+
       - name: Run integration tests
         env:
           TEST_DATABASE_URL: postgres://aether:aether_test_pass@localhost:5432/aether_test?sslmode=disable

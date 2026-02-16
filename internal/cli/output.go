@@ -68,7 +68,7 @@ type Spinner struct {
 func NewSpinner(message string) *Spinner {
 	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	s.Suffix = " " + message
-	s.Color("cyan")
+	_ = s.Color("cyan") // Best effort - error only on invalid color name
 	return &Spinner{s: s}
 }
 
