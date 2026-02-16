@@ -25,7 +25,7 @@ func TestChaos_StressWithFailures(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("high load scheduling with Redis failures", func(t *testing.T) {
-		env.SkipIfNoInfrastructure("redis")
+		env.SkipIfNoInfrastructure(t, "redis")
 
 		const numAgents = 50
 		const failurePoint = 25
@@ -86,7 +86,7 @@ func TestChaos_StressWithFailures(t *testing.T) {
 	})
 
 	t.Run("rapid failure and recovery cycles", func(t *testing.T) {
-		env.SkipIfNoInfrastructure("redis")
+		env.SkipIfNoInfrastructure(t, "redis")
 
 		const numCycles = 10
 		const opsPerCycle = 5
@@ -173,7 +173,7 @@ func TestChaos_SlowRecovery(t *testing.T) {
 	env := SetupChaosEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("redis")
+	env.SkipIfNoInfrastructure(t, "redis")
 
 	ctx := context.Background()
 
@@ -217,7 +217,7 @@ func TestChaos_CascadingFailures(t *testing.T) {
 	env := SetupChaosEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("redis", "postgres")
+	env.SkipIfNoInfrastructure(t, "redis", "postgres")
 
 	ctx := context.Background()
 
@@ -352,7 +352,7 @@ func TestChaos_LongRunningFailure(t *testing.T) {
 	env := SetupChaosEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("redis")
+	env.SkipIfNoInfrastructure(t, "redis")
 
 	ctx := context.Background()
 

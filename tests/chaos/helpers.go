@@ -261,20 +261,20 @@ func (env *ChaosEnvironment) CreateTestAgent(name string) *pkgapi.AgentConfig {
 }
 
 // SkipIfNoInfrastructure skips test if required infrastructure is unavailable
-func (env *ChaosEnvironment) SkipIfNoInfrastructure(services ...string) {
+func (env *ChaosEnvironment) SkipIfNoInfrastructure(t *testing.T, services ...string) {
 	for _, service := range services {
 		switch service {
 		case "postgres", "postgresql":
 			if env.DB == nil {
-				env.T.Skip("PostgreSQL not available for chaos test")
+				t.Skip("PostgreSQL not available for chaos test")
 			}
 		case "redis":
 			if env.RedisClient == nil {
-				env.T.Skip("Redis not available for chaos test")
+				t.Skip("Redis not available for chaos test")
 			}
 		case "etcd":
 			if env.EtcdClient == nil {
-				env.T.Skip("etcd not available for chaos test")
+				t.Skip("etcd not available for chaos test")
 			}
 		}
 	}
