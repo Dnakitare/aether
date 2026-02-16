@@ -147,8 +147,9 @@ func (tb *TokenBucket) Allow(ctx context.Context, key string, limit Limit) (*Res
 		end
 
 		-- Calculate tokens to add based on time elapsed
+		-- now is in milliseconds, so convert to seconds for rate calculation
 		local elapsed = now - last_refill
-		local tokens_to_add = elapsed * rate
+		local tokens_to_add = (elapsed / 1000) * rate
 
 		-- Refill tokens (up to burst capacity)
 		tokens = math.min(burst, tokens + tokens_to_add)
@@ -167,19 +168,21 @@ func (tb *TokenBucket) Allow(ctx context.Context, key string, limit Limit) (*Res
 		redis.call('SET', tokens_key, tokens, 'EX', 3600)
 		redis.call('SET', last_refill_key, last_refill, 'EX', 3600)
 
-		-- Return: allowed, tokens remaining, reset_at
-		local reset_at = now + ((burst - tokens) / rate)
+		-- Return: allowed, tokens remaining, reset_at (in milliseconds)
+		local reset_at = now + (((burst - tokens) / rate) * 1000)
 		return {allowed, math.floor(tokens), math.floor(reset_at)}
 	`)
 
 	// Execute script
+	// Use milliseconds for better precision in concurrent scenarios
+	nowMs := now.UnixMilli()
 	result, err := script.Run(
 		ctx,
 		tb.redis,
 		[]string{tokensKey, lastRefillKey},
 		limit.Rate,
 		limit.Burst,
-		now.Unix(),
+		nowMs,
 		1, // Request 1 token
 	).Result()
 
@@ -195,7 +198,8 @@ func (tb *TokenBucket) Allow(ctx context.Context, key string, limit Limit) (*Res
 
 	allowed := values[0].(int64) == 1
 	remaining := int(values[1].(int64))
-	resetAt := time.Unix(values[2].(int64), 0)
+	resetAtMs := values[2].(int64)
+	resetAt := time.UnixMilli(resetAtMs)
 
 	var retryAfter time.Duration
 	if !allowed {

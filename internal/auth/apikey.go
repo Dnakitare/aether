@@ -225,7 +225,9 @@ func generateRandomKey(length int) (string, error) {
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(bytes)[:length], nil
+	// Use RawStdEncoding instead of RawURLEncoding to avoid underscores in keys
+	// This ensures keys can be safely split on underscore delimiter
+	return base64.RawStdEncoding.EncodeToString(bytes)[:length], nil
 }
 
 // hashKey hashes an API key using SHA-256.
