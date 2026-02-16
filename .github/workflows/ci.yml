@@ -92,7 +92,7 @@ jobs:
           version: latest
           args: --timeout=5m
 
-  # Integration tests with PostgreSQL
+  # Integration tests with PostgreSQL and Redis
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -111,6 +111,16 @@ jobs:
         ports:
           - 5432:5432
 
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -124,8 +134,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Wait for PostgreSQL
+      - name: Wait for services
         run: |
+          echo "Waiting for PostgreSQL..."
           for i in {1..30}; do
             if pg_isready -h localhost -p 5432 -U aether > /dev/null 2>&1; then
               echo "✅ PostgreSQL is ready"
@@ -135,11 +146,22 @@ jobs:
             sleep 2
           done
 
+          echo "Waiting for Redis..."
+          for i in {1..30}; do
+            if redis-cli -h localhost ping > /dev/null 2>&1; then
+              echo "✅ Redis is ready"
+              break
+            fi
+            echo "Waiting for Redis... ($i/30)"
+            sleep 2
+          done
+
       - name: Run integration tests
         env:
           TEST_DATABASE_URL: postgres://aether:aether_test_pass@localhost:5432/aether_test?sslmode=disable
+          TEST_REDIS_URL: redis://localhost:6379
         run: |
-          echo "Running integration tests with PostgreSQL..."
+          echo "Running integration tests with PostgreSQL and Redis..."
           go test -v -race ./tests/integration/... -timeout 15m
 
       - name: Run checkpoint recovery tests

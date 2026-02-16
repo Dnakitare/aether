@@ -331,6 +331,7 @@ func incrementIP(ip net.IP, n int) net.IP {
 
 	for i := len(result) - 1; i >= 0 && n > 0; i-- {
 		sum := int(result[i]) + n
+		// #nosec G115 - sum % 256 is always in range [0, 255], safe for byte
 		result[i] = byte(sum % 256)
 		n = sum / 256
 	}

@@ -216,6 +216,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Initialize PostgreSQL state store (Alpha: use environment variable or default)
 	postgresURL := os.Getenv("DATABASE_URL")
 	if postgresURL == "" {
+		// #nosec G101 - Default development credentials, overridden by DATABASE_URL env var in production
 		postgresURL = "postgres://postgres:postgres@localhost:5432/aether?sslmode=disable"
 	}
 

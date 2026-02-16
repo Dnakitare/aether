@@ -142,6 +142,7 @@ func (env *ChaosEnvironment) setupInfrastructure() {
 
 // setupAuth creates JWT manager
 func (env *ChaosEnvironment) setupAuth() {
+	// #nosec G101 - Test secret key for chaos testing, not production
 	config := auth.Config{
 		SecretKey:     "chaos-test-secret-key-12345",
 		TokenDuration: 1 * time.Hour,

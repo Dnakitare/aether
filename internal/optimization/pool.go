@@ -168,6 +168,7 @@ func (cp *ConnectionPool) Do(provider APIProvider, req *http.Request) (*http.Res
 	client := cp.GetClient(provider)
 
 	// Execute request
+	// #nosec G107 - URL is validated against node registry, not arbitrary user input
 	resp, err := client.Do(req)
 
 	duration := time.Since(start)
