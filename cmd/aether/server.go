@@ -270,7 +270,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
-	defer rt.Shutdown(ctx)
+	defer func() {
+		if err := rt.Shutdown(ctx); err != nil {
+			logger.Error("failed to shutdown runtime", "error", err)
+		}
+	}()
 
 	logger.InfoContext(ctx, "runtime initialized")
 

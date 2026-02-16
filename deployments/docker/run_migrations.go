@@ -35,7 +35,8 @@ func main() {
 
 	fmt.Println("Running migrations...")
 	if err := database.RunMigrations(logger, db, config); err != nil {
-		log.Fatalf("migration failed: %v", err)
+		fmt.Printf("migration failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("Migrations completed successfully!")
