@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/aether-runtime/aether/internal/recovery"
 	"github.com/aether-runtime/aether/internal/runtime/agent"
 	"github.com/aether-runtime/aether/internal/runtime/vm"
 	"github.com/aether-runtime/aether/pkg/api"
@@ -39,12 +41,13 @@ type MetricsRecorder interface {
 
 // Runtime is the main Aether runtime that manages agent lifecycle.
 type Runtime struct {
-	logger     *slog.Logger
-	tracer     trace.Tracer
-	metrics    MetricsRecorder
-	vmManager  *vm.Manager
-	stateStore StateStore
-	config     Config
+	logger            *slog.Logger
+	tracer            trace.Tracer
+	metrics           MetricsRecorder
+	vmManager         *vm.Manager
+	stateStore        StateStore
+	checkpointManager *recovery.CheckpointManager
+	config            Config
 
 	mu     sync.RWMutex
 	agents map[api.AgentID]*agent.Agent
@@ -377,6 +380,167 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	}
 
 	r.logger.InfoContext(ctx, "runtime shutdown complete")
+	return nil
+}
+
+// SetCheckpointManager sets the checkpoint manager for the runtime.
+// This should be called after creating the runtime if checkpoint functionality is desired.
+func (r *Runtime) SetCheckpointManager(db *sql.DB) error {
+	config := recovery.DefaultCheckpointConfig()
+	cm, err := recovery.NewCheckpointManager(r.logger, db, config)
+	if err != nil {
+		return fmt.Errorf("failed to create checkpoint manager: %w", err)
+	}
+	r.checkpointManager = cm
+	r.logger.Info("checkpoint manager initialized",
+		"retention_count", config.RetentionCount,
+		"max_size_mb", config.MaxCheckpointSize/(1024*1024),
+	)
+	return nil
+}
+
+// CreateCheckpoint creates a checkpoint for an agent.
+func (r *Runtime) CreateCheckpoint(ctx context.Context, agentID api.AgentID) (*recovery.Checkpoint, error) {
+	if r.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	r.logger.InfoContext(ctx, "creating checkpoint", "agent_id", agentID)
+
+	// Get agent info
+	agentInstance, err := r.getAgent(agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	info := agentInstance.GetInfo()
+
+	// Create state snapshot
+	state := map[string]interface{}{
+		"status":     string(info.Status),
+		"config":     info.Config,
+		"created_at": time.Now().Format(time.RFC3339),
+	}
+
+	// Metadata
+	metadata := map[string]string{
+		"image":     info.Config.Image,
+		"cpu_count": fmt.Sprintf("%d", info.Config.Resources.CPUCount),
+		"memory_mb": fmt.Sprintf("%d", info.Config.Resources.MemoryMB),
+	}
+
+	// Create checkpoint
+	checkpoint, err := r.checkpointManager.CreateCheckpoint(
+		ctx,
+		agentID,
+		info.Config.TenantID,
+		state,
+		metadata,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create checkpoint: %w", err)
+	}
+
+	r.logger.InfoContext(ctx, "checkpoint created successfully",
+		"agent_id", agentID,
+		"version", checkpoint.Version,
+		"size", checkpoint.Size,
+	)
+
+	return checkpoint, nil
+}
+
+// ListCheckpoints lists all checkpoints for an agent.
+func (r *Runtime) ListCheckpoints(ctx context.Context, agentID api.AgentID) ([]*recovery.Checkpoint, error) {
+	if r.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	checkpoints, err := r.checkpointManager.ListCheckpoints(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list checkpoints: %w", err)
+	}
+
+	return checkpoints, nil
+}
+
+// GetLatestCheckpoint gets the latest checkpoint for an agent.
+func (r *Runtime) GetLatestCheckpoint(ctx context.Context, agentID api.AgentID) (*recovery.Checkpoint, error) {
+	if r.checkpointManager == nil {
+		return nil, fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	checkpoint, err := r.checkpointManager.GetLatestCheckpoint(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest checkpoint: %w", err)
+	}
+
+	return checkpoint, nil
+}
+
+// RestoreFromCheckpoint restores an agent from a checkpoint.
+func (r *Runtime) RestoreFromCheckpoint(ctx context.Context, agentID api.AgentID, version int) error {
+	if r.checkpointManager == nil {
+		return fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	r.logger.InfoContext(ctx, "restoring agent from checkpoint",
+		"agent_id", agentID,
+		"version", version,
+	)
+
+	// Get checkpoint
+	var checkpoint *recovery.Checkpoint
+	var err error
+	if version > 0 {
+		checkpoint, err = r.checkpointManager.GetCheckpointByVersion(ctx, agentID, version)
+	} else {
+		checkpoint, err = r.checkpointManager.GetLatestCheckpoint(ctx, agentID)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get checkpoint: %w", err)
+	}
+
+	r.logger.InfoContext(ctx, "found checkpoint",
+		"version", checkpoint.Version,
+		"created_at", checkpoint.CreatedAt,
+	)
+
+	// TODO: Actually restore the agent state
+	// For now, this is a placeholder that demonstrates the checkpoint retrieval
+	// In a full implementation, this would:
+	// 1. Stop the current agent if running
+	// 2. Restore the VM state from checkpoint
+	// 3. Restart the agent with restored state
+
+	r.logger.WarnContext(ctx, "checkpoint restore not fully implemented",
+		"agent_id", agentID,
+		"version", checkpoint.Version,
+	)
+
+	return nil
+}
+
+// DeleteCheckpoint deletes a specific checkpoint.
+func (r *Runtime) DeleteCheckpoint(ctx context.Context, agentID api.AgentID, version int) error {
+	if r.checkpointManager == nil {
+		return fmt.Errorf("checkpoint manager not initialized")
+	}
+
+	r.logger.InfoContext(ctx, "deleting checkpoint",
+		"agent_id", agentID,
+		"version", version,
+	)
+
+	if err := r.checkpointManager.DeleteCheckpoint(ctx, agentID, version); err != nil {
+		return fmt.Errorf("failed to delete checkpoint: %w", err)
+	}
+
+	r.logger.InfoContext(ctx, "checkpoint deleted successfully",
+		"agent_id", agentID,
+		"version", version,
+	)
+
 	return nil
 }
 
