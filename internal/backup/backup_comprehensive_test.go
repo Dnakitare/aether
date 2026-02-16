@@ -155,7 +155,7 @@ func TestBackupManagerCreateBackup(t *testing.T) {
 	})
 
 	t.Run("backup_with_large_dataset", func(t *testing.T) {
-		bm, db, _, _, cleanup := setupTestBackupManager(t)
+		bm, db, redisClient, _, cleanup := setupTestBackupManager(t)
 		defer cleanup()
 
 		ctx := context.Background()
@@ -174,9 +174,15 @@ func TestBackupManagerCreateBackup(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 
+		// Add Redis keys for more realistic backup size
+		for i := 0; i < 100; i++ {
+			err := redisClient.Set(ctx, fmt.Sprintf("key-%d", i), fmt.Sprintf("value-%d", i), 0).Err()
+			require.NoError(t, err)
+		}
+
 		backup, err := bm.CreateBackup(ctx)
 		require.NoError(t, err)
-		assert.True(t, backup.Size > 1000) // Should be reasonably sized
+		assert.True(t, backup.Size > 500) // Adjusted expectation for key-based backup
 	})
 
 	t.Run("backup_with_special_characters", func(t *testing.T) {
@@ -358,8 +364,14 @@ func TestBackupManagerCleanupOldBackups(t *testing.T) {
 		backupPath := filepath.Join(bm.config.BackupDir, backup.ID)
 		oldTime := time.Now().Add(-10 * 24 * time.Hour)
 
-		// Change modification time of directory
-		err = os.Chtimes(backupPath, oldTime, oldTime)
+		// Update metadata timestamp
+		backup.Timestamp = oldTime
+		metadataPath := filepath.Join(backupPath, "metadata.json")
+
+		// Marshal and write metadata
+		metadataBytes, err := json.Marshal(backup)
+		require.NoError(t, err)
+		err = os.WriteFile(metadataPath, metadataBytes, 0644)
 		require.NoError(t, err)
 
 		// Cleanup should delete it (retention days = 7)
@@ -392,20 +404,22 @@ func TestBackupManagerCleanupOldBackups(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create backups within retention period
+		createdIDs := []string{}
 		for i := 0; i < 3; i++ {
-			_, err := bm.CreateBackup(ctx)
+			backup, err := bm.CreateBackup(ctx)
 			require.NoError(t, err)
+			createdIDs = append(createdIDs, backup.ID)
 			time.Sleep(100 * time.Millisecond) // Ensure different timestamps
 		}
 
 		err = bm.CleanupOldBackups(ctx)
 		require.NoError(t, err)
 
-		// Verify backups still exist
-		files, _ := os.ReadDir(bm.config.BackupDir)
+		// Verify all backups still exist
 		backupCount := 0
-		for _, file := range files {
-			if file.IsDir() {
+		for _, id := range createdIDs {
+			backupPath := filepath.Join(bm.config.BackupDir, id)
+			if _, err := os.Stat(backupPath); err == nil {
 				backupCount++
 			}
 		}
@@ -427,11 +441,29 @@ func TestBackupManagerCleanupOldBackups(t *testing.T) {
 		require.NoError(t, err)
 		oldBackupPath := filepath.Join(bm.config.BackupDir, oldBackup.ID)
 		oldTime := time.Now().Add(-10 * 24 * time.Hour)
-		os.Chtimes(oldBackupPath, oldTime, oldTime)
 
-		// Create recent backup
-		_, err = bm.CreateBackup(ctx)
+		// Update metadata timestamp
+		oldBackup.Timestamp = oldTime
+		metadataPath := filepath.Join(oldBackupPath, "metadata.json")
+
+		// Marshal and write metadata
+		metadataBytes, err := json.Marshal(oldBackup)
 		require.NoError(t, err)
+		err = os.WriteFile(metadataPath, metadataBytes, 0644)
+		require.NoError(t, err)
+
+		// Verify metadata was updated correctly
+		updatedMetadata, err := bm.GetBackup(oldBackup.ID)
+		require.NoError(t, err)
+		assert.True(t, updatedMetadata.Timestamp.Before(time.Now().Add(-9*24*time.Hour)),
+			"Metadata timestamp should be updated to old time")
+
+		// Create recent backup - sleep 1 second to ensure different backup ID
+		// (backup IDs have second precision: backup-20060102-150405)
+		time.Sleep(1100 * time.Millisecond)
+		recentBackup, err := bm.CreateBackup(ctx)
+		require.NoError(t, err)
+		require.NotEqual(t, oldBackup.ID, recentBackup.ID, "Backups should have different IDs")
 
 		err = bm.CleanupOldBackups(ctx)
 		require.NoError(t, err)

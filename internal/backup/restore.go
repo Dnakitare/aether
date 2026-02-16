@@ -361,6 +361,11 @@ func (drm *DisasterRecoveryManager) InitiateFailover(ctx context.Context) error 
 
 	start := time.Now()
 
+	// Check if backup and restore managers are available
+	if drm.backupManager == nil || drm.restoreManager == nil {
+		return fmt.Errorf("backup and restore managers required for failover")
+	}
+
 	// Step 1: Verify secondary region is healthy
 	drm.logger.Info("verifying secondary region health")
 	// In production: check secondary region health
@@ -425,7 +430,11 @@ func (drm *DisasterRecoveryManager) GetDRStatus(ctx context.Context) (*DRStatus,
 		CurrentRegion: drm.config.PrimaryRegion,
 	}
 
-	// Check backup freshness
+	// Check backup freshness (if backup manager is available)
+	if drm.backupManager == nil {
+		return status, nil
+	}
+
 	backups, err := drm.backupManager.ListBackups()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get DR status: %w", err)
@@ -456,6 +465,11 @@ func (drm *DisasterRecoveryManager) GetDRStatus(ctx context.Context) (*DRStatus,
 // TestFailover performs a failover test without affecting production
 func (drm *DisasterRecoveryManager) TestFailover(ctx context.Context) error {
 	drm.logger.Info("starting failover test")
+
+	// Check if backup and restore managers are available
+	if drm.backupManager == nil || drm.restoreManager == nil {
+		return fmt.Errorf("backup and restore managers required for failover test")
+	}
 
 	// In production: use a test environment/namespace
 	drm.logger.Info("failover test would run here (requires test environment)")
