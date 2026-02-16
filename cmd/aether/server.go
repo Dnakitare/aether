@@ -87,7 +87,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create shard manager: %w", err)
 		}
-		defer shardManager.Stop(ctx)
+		defer func() {
+			if err := shardManager.Stop(ctx); err != nil {
+				logger.Error("failed to stop shard manager", "error", err)
+			}
+		}()
 
 		if err := shardManager.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start shard manager: %w", err)
@@ -108,7 +112,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create node registry: %w", err)
 		}
-		defer nodeRegistry.Close()
+		defer func() {
+			if err := nodeRegistry.Close(); err != nil {
+				logger.Error("failed to close node registry", "error", err)
+			}
+		}()
 
 		logger.InfoContext(ctx, "node registry initialized")
 
@@ -128,7 +136,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create queue: %w", err)
 		}
-		defer queue.Stop(ctx)
+		defer func() {
+			if err := queue.Stop(ctx); err != nil {
+				logger.Error("failed to stop queue", "error", err)
+			}
+		}()
 
 		// Register placement handler
 		placer := scheduler.NewPlacer(scheduler.BinPacking)
@@ -231,7 +243,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create postgres store: %w", err)
 	}
-	defer stateStore.Close()
+	defer func() {
+		if err := stateStore.Close(); err != nil {
+			logger.Error("failed to close state store", "error", err)
+		}
+	}()
 
 	logger.InfoContext(ctx, "postgres store initialized")
 
@@ -329,7 +345,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err := apiSrv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start API server: %w", err)
 	}
-	defer apiSrv.Stop(ctx)
+	defer func() {
+		if err := apiSrv.Stop(ctx); err != nil {
+			logger.Error("failed to stop API server", "error", err)
+		}
+	}()
 
 	logger.InfoContext(ctx, "Aether server started successfully")
 	logger.InfoContext(ctx, "scheduler mode", "mode", cfg.Scheduler.Mode)

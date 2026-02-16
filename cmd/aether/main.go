@@ -294,7 +294,7 @@ func init() {
 	agentCreateCmd.Flags().StringVar(&agentTenantID, "tenant", "default", "Tenant ID")
 	agentCreateCmd.Flags().IntVar(&agentCPU, "cpu", 1, "Number of CPUs")
 	agentCreateCmd.Flags().Int64Var(&agentMemoryMB, "memory", 512, "Memory in MB")
-	agentCreateCmd.MarkFlagRequired("name")
+	_ = agentCreateCmd.MarkFlagRequired("name") // Error only occurs if flag doesn't exist
 }
 
 var agentListCmd = &cobra.Command{
@@ -366,7 +366,9 @@ var agentLogsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get logs: %w", err)
 		}
-		defer reader.Close()
+		defer func() {
+			_ = reader.Close() // Best effort close
+		}()
 
 		// Stream logs to stdout
 		buf := make([]byte, 1024)
