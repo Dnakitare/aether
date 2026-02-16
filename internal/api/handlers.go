@@ -28,6 +28,9 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse pagination parameters
+	pagination := parsePaginationParams(r)
+
 	// List all agents and filter by tenant
 	// NOTE: For large deployments, consider adding tenant filtering to runtime.ListAgents
 	// to avoid loading all agents into memory. Current approach is sufficient for <10k agents.
@@ -45,7 +48,24 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.respondJSON(w, http.StatusOK, agents)
+	// Apply pagination
+	totalItems := len(agents)
+	start := pagination.Offset
+	end := start + pagination.PageSize
+
+	// Bounds checking
+	if start > totalItems {
+		start = totalItems
+	}
+	if end > totalItems {
+		end = totalItems
+	}
+
+	// Slice the results
+	paginatedAgents := agents[start:end]
+
+	// Return paginated response
+	s.respondPaginated(w, paginatedAgents, pagination, totalItems)
 }
 
 func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
