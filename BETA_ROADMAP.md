@@ -196,13 +196,13 @@
   - [x] Release notes (BETA_RELEASE_NOTES.md)
   - [x] Upgrade guide (UPGRADE_GUIDE.md)
   - [x] Documentation complete
-  - [ ] Tag and publish v0.2.0-beta (ready for release)
+  - [x] Tag and publish v0.2.0-beta
 
 **Deliverables:**
 - ✅ Test coverage: 35.1% (improved from 30.8%)
 - ✅ Complete documentation (4 comprehensive guides)
 - ✅ Release notes and upgrade guide
-- ⏳ Beta release ready for publish
+- ✅ Beta v0.2.0 published (tag: v0.2.0-beta)
 
 ---
 
