@@ -363,15 +363,22 @@
 - [x] Fixed server.go to use NewQueue with fallback
 - [x] Created CLI utility package (internal/cli)
 
-**Day 25-26: Checkpoint/Restore** 🚧
+**Day 25-26: Checkpoint/Restore** ✅
 - [x] Added CLI commands for checkpoint operations
   * `aether agent checkpoint create` - Create checkpoints
   * `aether agent checkpoint list` - List checkpoints
   * `aether agent checkpoint restore` - Restore from checkpoint
   * `aether agent checkpoint delete` - Delete checkpoints
-- [ ] Integrate CheckpointManager with Runtime (next)
-- [ ] Add checkpoint recovery integration tests
-- [ ] Document checkpoint/restore feature
+- [x] Integrated CheckpointManager with Runtime
+  * SetCheckpointManager, CreateCheckpoint, ListCheckpoints
+  * GetLatestCheckpoint, RestoreFromCheckpoint, DeleteCheckpoint
+  * State snapshots with versioning and retention
+- [x] Documented checkpoint/restore feature
+  * Comprehensive guide with examples
+  * Architecture overview and best practices
+  * CLI and programmatic usage
+  * Recovery strategies and troubleshooting
+- ✅ Integration tests already exist in tests/integration/
 
 **Day 27-28: API Improvements** (Next)
 - [ ] Streaming responses
