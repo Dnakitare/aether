@@ -147,7 +147,7 @@
 ### Week 5: Deployment & Infrastructure (Mar 15-22)
 **Focus**: Terraform, Kubernetes, Docker
 
-- [ ] **Day 29-31**: Terraform modules
+- [x] **Day 29-31**: Terraform modules
   - AWS module (ECS, RDS, ElastiCache)
   - VPC and networking
   - Security groups
@@ -305,6 +305,9 @@
 ### Week 4: Enhanced Features
 **Status**: ✅ COMPLETE (100% done)
 
+### Week 5: Deployment & Infrastructure
+**Status**: 🚧 In Progress (33% done - Day 29-31 complete)
+
 **Week 1-2 Completed Tasks:**
 - [x] Create Beta branch
 - [x] Create Beta roadmap
@@ -388,6 +391,45 @@
 - [x] Bulk operations (bulk create/delete endpoints with concurrency)
 - [x] Enhanced error handling (RFC 7807 Problem Details)
 - [x] Pagination support (added to list endpoints with metadata)
+
+**Week 5: Deployment & Infrastructure** 🚧
+
+**Day 29-31: Terraform Modules** ✅
+- [x] Created terraform/aws/ root module with comprehensive configuration
+- [x] Implemented VPC module with Multi-AZ networking
+  * Public and private subnets across 3 AZs
+  * NAT Gateways with single-gateway option for cost savings
+  * VPC Flow Logs with CloudWatch integration
+  * S3 VPC Endpoint for cost optimization
+- [x] Implemented ECS module with Fargate and ALB
+  * ECS cluster with Container Insights
+  * Application Load Balancer with health checks
+  * Auto-scaling based on CPU/memory (70%/80% targets)
+  * CloudWatch Logs with configurable retention
+  * Security groups for ALB and ECS tasks
+  * IAM roles for task execution and runtime
+- [x] Implemented RDS module for PostgreSQL
+  * Multi-AZ deployment support
+  * Automated backups with 7-day retention
+  * Storage autoscaling (20GB-100GB)
+  * Secrets Manager integration for credentials
+  * Performance Insights enabled
+  * CloudWatch alarms (CPU, storage, memory)
+- [x] Implemented ElastiCache module for Redis
+  * Replication group for automatic failover
+  * Single-node option for development
+  * Encryption at rest and in transit
+  * CloudWatch alarms (CPU, memory)
+  * Automated snapshots
+- [x] Created comprehensive README with architecture diagrams
+- [x] Added terraform.tfvars.example for quick start
+- [x] Configured 40+ variables for customization
+
+**Day 32-34: Kubernetes Support** (Next)
+- [ ] Helm chart
+- [ ] StatefulSet for scheduler
+- [ ] HPA configuration
+- [ ] Network policies
 
 ---
 
