@@ -511,19 +511,37 @@ var checkpointCreateCmd = &cobra.Command{
 	Long:  "Create a state checkpoint for the specified agent. Checkpoints can be used to restore agent state later.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		agentID := api.AgentID(args[0])
 
-		cli.Info("Creating checkpoint for agent %s", agentID)
-		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+		spinner := cli.NewSpinner(fmt.Sprintf("Creating checkpoint for agent %s...", agentID))
+		spinner.Start()
+		defer spinner.Stop()
 
-		// TODO: Integrate with CheckpointManager when wired into runtime
-		// For now, show what the command would do
+		// Access checkpoint methods via concrete runtime type
+		concreteRT, ok := rt.(*runtime.Runtime)
+		if !ok {
+			spinner.Stop()
+			return fmt.Errorf("checkpoint functionality not available in current runtime")
+		}
+
+		checkpoint, err := concreteRT.CreateCheckpoint(ctx, agentID)
+		if err != nil {
+			spinner.Stop()
+			return fmt.Errorf("failed to create checkpoint: %w", err)
+		}
+
+		spinner.Stop()
+		cli.Success("✓ Checkpoint created successfully")
 		fmt.Println()
-		cli.Dim("  This will create a snapshot of the agent's current state")
-		cli.Dim("  The checkpoint will be stored in PostgreSQL")
-		cli.Dim("  You can restore from this checkpoint later")
+		table := cli.NewTable("FIELD", "VALUE")
+		table.AddRow("Version", fmt.Sprintf("%d", checkpoint.Version))
+		table.AddRow("Created", checkpoint.CreatedAt.Format(time.RFC3339))
+		table.AddRow("Size", fmt.Sprintf("%d bytes", checkpoint.Size))
+		table.AddRow("State Keys", fmt.Sprintf("%d", len(checkpoint.State)))
+		table.Print()
 
-		return fmt.Errorf("checkpoint creation not yet integrated with runtime")
+		return nil
 	},
 }
 
@@ -533,19 +551,45 @@ var checkpointListCmd = &cobra.Command{
 	Long:  "List all available checkpoints for the specified agent.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		agentID := api.AgentID(args[0])
 
-		cli.Info("Listing checkpoints for agent %s", agentID)
-		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+		// Access checkpoint methods via concrete runtime type
+		concreteRT, ok := rt.(*runtime.Runtime)
+		if !ok {
+			return fmt.Errorf("checkpoint functionality not available in current runtime")
+		}
 
-		// TODO: Integrate with CheckpointManager when wired into runtime
+		checkpoints, err := concreteRT.ListCheckpoints(ctx, agentID)
+		if err != nil {
+			return fmt.Errorf("failed to list checkpoints: %w", err)
+		}
+
+		if len(checkpoints) == 0 {
+			cli.Info("No checkpoints found for agent %s", agentID)
+			return nil
+		}
+
+		cli.Info("Checkpoints for agent %s:", agentID)
 		fmt.Println()
-		table := cli.NewTable("VERSION", "CREATED", "SIZE", "STATUS")
-		table.AddRow("1", "2026-02-15 10:00:00", "1.2 MB", "Available")
-		table.AddRow("2", "2026-02-15 11:00:00", "1.3 MB", "Available")
+		table := cli.NewTable("VERSION", "CREATED", "SIZE", "STATE KEYS")
+		for _, cp := range checkpoints {
+			sizeStr := fmt.Sprintf("%d bytes", cp.Size)
+			if cp.Size > 1024*1024 {
+				sizeStr = fmt.Sprintf("%.2f MB", float64(cp.Size)/(1024*1024))
+			} else if cp.Size > 1024 {
+				sizeStr = fmt.Sprintf("%.2f KB", float64(cp.Size)/1024)
+			}
+			table.AddRow(
+				fmt.Sprintf("%d", cp.Version),
+				cp.CreatedAt.Format("2006-01-02 15:04:05"),
+				sizeStr,
+				fmt.Sprintf("%d", len(cp.State)),
+			)
+		}
 		table.Print()
 
-		return fmt.Errorf("checkpoint listing not yet integrated with runtime")
+		return nil
 	},
 }
 
@@ -559,23 +603,37 @@ var checkpointRestoreCmd = &cobra.Command{
 	Long:  "Restore an agent's state from a checkpoint. By default, restores from the latest checkpoint.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		agentID := api.AgentID(args[0])
 
-		versionMsg := "latest"
+		versionMsg := "latest checkpoint"
 		if restoreVersion > 0 {
-			versionMsg = fmt.Sprintf("version %d", restoreVersion)
+			versionMsg = fmt.Sprintf("checkpoint version %d", restoreVersion)
 		}
 
-		cli.Info("Restoring agent %s from checkpoint %s", agentID, versionMsg)
-		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+		spinner := cli.NewSpinner(fmt.Sprintf("Restoring agent %s from %s...", agentID, versionMsg))
+		spinner.Start()
+		defer spinner.Stop()
 
-		// TODO: Integrate with RecoveryManager when wired into runtime
+		// Access checkpoint methods via concrete runtime type
+		concreteRT, ok := rt.(*runtime.Runtime)
+		if !ok {
+			spinner.Stop()
+			return fmt.Errorf("checkpoint functionality not available in current runtime")
+		}
+
+		if err := concreteRT.RestoreFromCheckpoint(ctx, agentID, restoreVersion); err != nil {
+			spinner.Stop()
+			return fmt.Errorf("failed to restore from checkpoint: %w", err)
+		}
+
+		spinner.Stop()
+		cli.Success("✓ Agent %s restored from %s", agentID, versionMsg)
 		fmt.Println()
-		cli.Dim("  This will restore the agent to the state from the checkpoint")
-		cli.Dim("  The agent will be stopped and restarted with the restored state")
-		cli.Dim("  Any unsaved state since the checkpoint will be lost")
+		cli.Dim("  The agent has been stopped and restarted with the restored state")
+		cli.Dim("  Any unsaved state since the checkpoint has been lost")
 
-		return fmt.Errorf("checkpoint restore not yet integrated with runtime")
+		return nil
 	},
 }
 
@@ -589,17 +647,37 @@ var checkpointDeleteCmd = &cobra.Command{
 	Long:  "Delete a specific checkpoint version for an agent.",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		agentID := api.AgentID(args[0])
-		version := args[1]
 
-		cli.Warn("Deleting checkpoint version %s for agent %s", version, agentID)
-		cli.Warn("Note: Checkpoint functionality requires integration with runtime (coming soon)")
+		var versionNum int
+		_, err := fmt.Sscanf(args[1], "%d", &versionNum)
+		if err != nil {
+			return fmt.Errorf("invalid version number: %s", args[1])
+		}
 
-		// TODO: Integrate with CheckpointManager when wired into runtime
-		fmt.Println()
-		cli.Dim("  This will permanently delete the specified checkpoint")
+		cli.Warn("⚠ Deleting checkpoint version %d for agent %s", versionNum, agentID)
 		cli.Dim("  This action cannot be undone")
+		fmt.Println()
 
-		return fmt.Errorf("checkpoint deletion not yet integrated with runtime")
+		// Access checkpoint methods via concrete runtime type
+		concreteRT, ok := rt.(*runtime.Runtime)
+		if !ok {
+			return fmt.Errorf("checkpoint functionality not available in current runtime")
+		}
+
+		spinner := cli.NewSpinner(fmt.Sprintf("Deleting checkpoint version %d...", versionNum))
+		spinner.Start()
+		defer spinner.Stop()
+
+		if err := concreteRT.DeleteCheckpoint(ctx, agentID, versionNum); err != nil {
+			spinner.Stop()
+			return fmt.Errorf("failed to delete checkpoint: %w", err)
+		}
+
+		spinner.Stop()
+		cli.Success("✓ Checkpoint version %d deleted successfully", versionNum)
+
+		return nil
 	},
 }

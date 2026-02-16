@@ -131,14 +131,79 @@ func runServer(cmd *cobra.Command, args []string) error {
 		defer queue.Stop(ctx)
 
 		// Register placement handler
-		// TODO: Wire up actual placement logic from runtime
+		placer := scheduler.NewPlacer(scheduler.BinPacking)
 		queue.RegisterHandler(func(ctx context.Context, req *distributed.SchedulingRequest) error {
 			logger.InfoContext(ctx, "received scheduling request",
 				"agent_id", req.AgentID,
 				"tenant_id", req.TenantID,
 			)
-			// Placeholder - actual implementation will use nodeRegistry.TryAllocate
-			return fmt.Errorf("not yet implemented")
+
+			// Get available nodes for this scheduler instance
+			nodes, err := nodeRegistry.GetOwnedNodes(ctx, cfg.Scheduler.SchedulerID)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to get owned nodes",
+					"scheduler_id", cfg.Scheduler.SchedulerID,
+					"error", err,
+				)
+				return fmt.Errorf("failed to get nodes: %w", err)
+			}
+
+			if len(nodes) == 0 {
+				logger.WarnContext(ctx, "no nodes available for scheduling",
+					"scheduler_id", cfg.Scheduler.SchedulerID,
+				)
+				return fmt.Errorf("no nodes available")
+			}
+
+			// Convert SchedulingRequest to AgentRequest for placement
+			agentReq := &scheduler.AgentRequest{
+				Config: api.AgentConfig{
+					ID:       req.AgentID,
+					TenantID: req.TenantID,
+				},
+				Resources:   req.Resources,
+				Constraints: req.Constraints,
+				Priority:    req.Priority,
+				CreatedAt:   time.Now(),
+			}
+
+			// Select best node using placement strategy
+			selectedNode, err := placer.SelectNode(agentReq, nodes)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to select node",
+					"agent_id", req.AgentID,
+					"available_nodes", len(nodes),
+					"error", err,
+				)
+				return fmt.Errorf("failed to select node: %w", err)
+			}
+
+			// Try to allocate agent on the selected node
+			success, err := nodeRegistry.TryAllocate(ctx, selectedNode.ID, req.AgentID, req.Resources)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to allocate agent",
+					"agent_id", req.AgentID,
+					"node_id", selectedNode.ID,
+					"error", err,
+				)
+				return fmt.Errorf("failed to allocate: %w", err)
+			}
+
+			if !success {
+				logger.WarnContext(ctx, "allocation failed - node resources changed",
+					"agent_id", req.AgentID,
+					"node_id", selectedNode.ID,
+				)
+				return fmt.Errorf("allocation failed due to concurrent modification")
+			}
+
+			logger.InfoContext(ctx, "agent successfully scheduled",
+				"agent_id", req.AgentID,
+				"node_id", selectedNode.ID,
+				"tenant_id", req.TenantID,
+			)
+
+			return nil
 		})
 
 		if err := queue.Start(ctx); err != nil {

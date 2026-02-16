@@ -124,7 +124,11 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 
 		if err := s.quotaManager.CheckQuota(ctx, req.TenantID, resources); err != nil {
 			// Check if it's a quota exceeded error
-			s.respondQuotaExceeded(w, "agent", 0, 0) // TODO: extract actual limits from error
+			if quotaErr, ok := err.(*tenant.QuotaExceededError); ok {
+				s.respondQuotaExceeded(w, quotaErr.Resource, quotaErr.Requested, quotaErr.Limit)
+			} else {
+				s.respondInternalError(w, fmt.Sprintf("Quota check failed: %v", err))
+			}
 			return
 		}
 
