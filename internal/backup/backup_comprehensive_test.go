@@ -35,6 +35,11 @@ func setupTestBackupManager(t *testing.T) (*BackupManager, *sql.DB, *redis.Clien
 		t.Skip("PostgreSQL not available for testing:", err)
 	}
 
+	// Try to ping database
+	if err := db.Ping(); err != nil {
+		t.Skip("PostgreSQL not available (ping failed):", err)
+	}
+
 	// Create test tables
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS test_agents (
