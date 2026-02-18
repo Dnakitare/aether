@@ -69,6 +69,16 @@ func NewStateReplication(logger *slog.Logger, config ReplicationConfig) (*StateR
 		return nil, fmt.Errorf("failed to create etcd client: %w", err)
 	}
 
+	// Test connection with timeout to fail fast if etcd is unavailable
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Use Status to verify connectivity (forces actual RPC call)
+	if _, err := client.Status(ctx, config.EtcdEndpoints[0]); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("etcd not available: %w", err)
+	}
+
 	watchCtx, watchCancel := context.WithCancel(context.Background())
 
 	return &StateReplication{
