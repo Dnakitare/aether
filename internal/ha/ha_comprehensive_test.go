@@ -699,9 +699,9 @@ func TestFailoverManagerBasics(t *testing.T) {
 
 		fm := ha.NewFailoverManager(logger, nil, nil, config)
 
-		failoverCalled := false
+		failoverCalled := int32(0)
 		fm.OnFailover(func(service string) error {
-			failoverCalled = true
+			atomic.StoreInt32(&failoverCalled, 1)
 			assert.Equal(t, "failing-service", service)
 			return nil
 		})
@@ -727,7 +727,7 @@ func TestFailoverManagerBasics(t *testing.T) {
 		time.Sleep(1 * time.Second)
 
 		// Verify failover was triggered
-		assert.True(t, failoverCalled)
+		assert.Equal(t, int32(1), atomic.LoadInt32(&failoverCalled))
 		assert.False(t, fm.IsHealthy("failing-service"))
 
 		status, ok := fm.GetHealthStatus("failing-service")
