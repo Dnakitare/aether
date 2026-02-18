@@ -193,6 +193,13 @@ func (env *ChaosEnvironment) setupScheduler() {
 	go env.Scheduler.Start(ctx)
 
 	env.Cleanup = append(env.Cleanup, func() {
+		// Use recover to handle potential double-stop
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore panic from closing already-closed channel
+				env.T.Logf("Scheduler stop recovered from panic (likely already stopped): %v", r)
+			}
+		}()
 		env.Scheduler.Stop()
 	})
 }
@@ -261,20 +268,21 @@ func (env *ChaosEnvironment) CreateTestAgent(name string) *pkgapi.AgentConfig {
 }
 
 // SkipIfNoInfrastructure skips test if required infrastructure is unavailable
-func (env *ChaosEnvironment) SkipIfNoInfrastructure(services ...string) {
+func (env *ChaosEnvironment) SkipIfNoInfrastructure(t *testing.T, services ...string) {
+	t.Helper()
 	for _, service := range services {
 		switch service {
 		case "postgres", "postgresql":
 			if env.DB == nil {
-				env.T.Skip("PostgreSQL not available for chaos test")
+				t.Skip("PostgreSQL not available for chaos test")
 			}
 		case "redis":
 			if env.RedisClient == nil {
-				env.T.Skip("Redis not available for chaos test")
+				t.Skip("Redis not available for chaos test")
 			}
 		case "etcd":
 			if env.EtcdClient == nil {
-				env.T.Skip("etcd not available for chaos test")
+				t.Skip("etcd not available for chaos test")
 			}
 		}
 	}
@@ -308,15 +316,13 @@ func AssertEventually(t *testing.T, condition func() bool, timeout time.Duration
 			return
 		}
 
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				msg := "Condition never became true"
-				if len(msgAndArgs) > 0 {
-					msg = fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
-				}
-				t.Fatal(msg)
+		<-ticker.C
+		if time.Now().After(deadline) {
+			msg := "Condition never became true"
+			if len(msgAndArgs) > 0 {
+				msg = fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
 			}
+			t.Fatal(msg)
 		}
 	}
 }

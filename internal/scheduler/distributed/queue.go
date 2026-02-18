@@ -375,11 +375,8 @@ func (dq *DistributedQueue) processMessage(ctx context.Context, message kafka.Me
 	handlers := dq.handlers
 	dq.mu.RUnlock()
 
-	var lastErr error
 	for _, handler := range handlers {
 		if err := handler(processCtx, &req); err != nil {
-			lastErr = err
-
 			// Check if error is retriable
 			if dq.isRetriable(err) && req.Metadata.Retries < dq.config.MaxRetries {
 				dq.logger.WarnContext(ctx, "retriable error, will retry",
@@ -400,10 +397,6 @@ func (dq *DistributedQueue) processMessage(ctx context.Context, message kafka.Me
 			dq.sendToDLQ(ctx, message, err)
 			return nil // Commit to move past failed message
 		}
-	}
-
-	if lastErr != nil {
-		return lastErr
 	}
 
 	dq.logger.InfoContext(ctx, "scheduling request processed successfully",
