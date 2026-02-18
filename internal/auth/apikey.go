@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -221,11 +220,21 @@ func (km *APIKeyManager) CleanupExpired(ctx context.Context) int {
 
 // generateRandomKey generates a random key of specified length.
 func generateRandomKey(length int) (string, error) {
+	// Use alphanumeric characters only (no - or _ from base64url)
+	// to avoid conflicts with separator character in key format
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(bytes)[:length], nil
+
+	// Map random bytes to charset
+	result := make([]byte, length)
+	for i, b := range bytes {
+		result[i] = charset[int(b)%len(charset)]
+	}
+
+	return string(result), nil
 }
 
 // hashKey hashes an API key using SHA-256.
