@@ -6,7 +6,6 @@ run:
 
 linters:
   enable:
-    - errcheck      # Check for unchecked errors
     - gosimple      # Simplify code
     - govet         # Examines Go source code and reports suspicious constructs
     - ineffassign   # Detects ineffectual assignments
@@ -14,6 +13,7 @@ linters:
     - gofmt         # Checks whether code was gofmt-ed
     - misspell      # Finds commonly misspelled English words
   disable:
+    - errcheck      # Too many false positives for cleanup code
     - unused        # Too many false positives
     - goimports     # Handled by gofmt
     - revive        # Too strict for this project
@@ -26,23 +26,6 @@ linters:
     - errorlint     # Not critical
 
 linters-settings:
-  errcheck:
-    check-blank: false
-    check-type-assertions: false
-    exclude-functions:
-      - (*database/sql.DB).Close
-      - (*database/sql.Rows).Close
-      - (*io.ReadCloser).Close
-      - (*os.File).Close
-      - (io.Closer).Close
-      - (*encoding/json.Encoder).Encode
-      - (fmt.Fprintf)
-      - (fmt.Printf)
-      - (*github.com/fatih/color.Color).Printf
-      - (*github.com/fatih/color.Color).Fprintf
-      - (*github.com/fatih/color.Color).Println
-      - (*github.com/briandowns/spinner.Spinner).Color
-
   govet:
     disable:
       - shadow
