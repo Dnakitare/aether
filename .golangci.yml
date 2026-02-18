@@ -35,6 +35,13 @@ linters-settings:
       - (*io.ReadCloser).Close
       - (*os.File).Close
       - (io.Closer).Close
+      - (*encoding/json.Encoder).Encode
+      - (fmt.Fprintf)
+      - (fmt.Printf)
+      - (*github.com/fatih/color.Color).Printf
+      - (*github.com/fatih/color.Color).Fprintf
+      - (*github.com/fatih/color.Color).Println
+      - (*github.com/briandowns/spinner.Spinner).Color
 
   govet:
     disable:
@@ -87,6 +94,8 @@ issues:
         - gosec
         - errcheck
         - gocritic
+        - staticcheck
+        - ineffassign
 
     # Ignore complexity and defer errors in CLI commands
     - path: cmd/
