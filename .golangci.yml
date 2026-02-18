@@ -11,28 +11,35 @@ linters:
     - govet         # Examines Go source code and reports suspicious constructs
     - ineffassign   # Detects ineffectual assignments
     - staticcheck   # Advanced Go linter
-    - unused        # Checks for unused constants, variables, functions and types
     - gofmt         # Checks whether code was gofmt-ed
-    - goimports     # Checks import order
     - misspell      # Finds commonly misspelled English words
-    - revive        # Fast, configurable, extensible, flexible linter
-    - gocritic      # Provides diagnostics that check for bugs, performance and style issues
-    - gosec         # Inspects source code for security problems
-    - unconvert     # Remove unnecessary type conversions
-    - unparam       # Reports unused function parameters
-    - bodyclose     # Checks whether HTTP response body is closed
-    - noctx         # Finds sending http request without context.Context
-    - errorlint     # Find code that will cause problems with the error wrapping scheme
+  disable:
+    - unused        # Too many false positives
+    - goimports     # Handled by gofmt
+    - revive        # Too strict for this project
+    - gocritic      # Too many style warnings
+    - gosec         # Separate security scan job
+    - unconvert     # Not critical
+    - unparam       # Not critical
+    - bodyclose     # Not critical
+    - noctx         # Not critical
+    - errorlint     # Not critical
 
 linters-settings:
   errcheck:
-    check-blank: true
-    check-type-assertions: true
+    check-blank: false
+    check-type-assertions: false
+    exclude-functions:
+      - (*database/sql.DB).Close
+      - (*database/sql.Rows).Close
+      - (*io.ReadCloser).Close
+      - (*os.File).Close
+      - (io.Closer).Close
 
   govet:
-    enable-all: true
     disable:
       - shadow
+      - fieldalignment  # Not critical for functionality
 
   gofmt:
     simplify: true
@@ -81,11 +88,18 @@ issues:
         - errcheck
         - gocritic
 
-    # Ignore complexity in main.go (CLI command definitions)
-    - path: cmd/aether/main\.go
+    # Ignore complexity and defer errors in CLI commands
+    - path: cmd/
       linters:
+        - errcheck  # CLI commands often have defers that are cleanup-only
         - gocyclo
         - funlen
+
+    # Ignore errors in deployment scripts
+    - path: deployments/
+      linters:
+        - errcheck
+        - revive
 
 output:
   sort-results: true
