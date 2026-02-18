@@ -934,6 +934,10 @@ func TestBackupCompression(t *testing.T) {
 		}
 		defer db.Close()
 
+		if err := db.Ping(); err != nil {
+			t.Skip("PostgreSQL not available (ping failed):", err)
+		}
+
 		mr, _ := miniredis.Run()
 		defer mr.Close()
 
