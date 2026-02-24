@@ -168,6 +168,7 @@ func (env *TestEnvironment) setupRuntime() {
 	// Create state store if PostgreSQL is available
 	var stateStore runtime.StateStore
 	if env.DB != nil {
+		// #nosec G101 - Test credentials, not production secrets
 		pgConfig := state.PostgresConfig{
 			DSN:             "postgres://postgres:postgres@localhost:5432/aether_test?sslmode=disable",
 			MaxOpenConns:    25,
@@ -421,6 +422,7 @@ func (env *TestEnvironment) HTTPRequest(method, path string, body interface{}) (
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 5 * time.Second}
+	// #nosec G107,G704 - URL is controlled by test code, not user input
 	return client.Do(req)
 }
 

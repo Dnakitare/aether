@@ -179,7 +179,6 @@ func (fm *FailoverManager) performHealthCheck(ctx context.Context, name string, 
 	duration := time.Since(start)
 
 	fm.mu.Lock()
-	defer fm.mu.Unlock()
 
 	status := fm.healthStatus[name]
 	status.LastCheck = time.Now()
@@ -199,31 +198,35 @@ func (fm *FailoverManager) performHealthCheck(ctx context.Context, name string, 
 		if status.ConsecutiveFails >= fm.config.FailureThreshold && status.Healthy {
 			status.Healthy = false
 			fm.healthStatus[name] = status
-			fm.mu.Unlock() // Unlock before calling failover
+			fm.mu.Unlock()
 			fm.triggerFailover(ctx, name)
-			fm.mu.Lock() // Re-lock before returning
 			return
 		}
-	} else {
-		// Health check passed
-		if !status.Healthy {
-			fm.logger.Info("service recovered",
-				"service", name,
-				"was_down_for", time.Since(status.LastFailover),
-			)
-		}
 
-		status.Healthy = true
-		status.ConsecutiveFails = 0
-		status.Message = "healthy"
+		fm.healthStatus[name] = status
+		fm.mu.Unlock()
+		return
+	}
 
-		fm.logger.Debug("health check passed",
+	// Health check passed
+	if !status.Healthy {
+		fm.logger.Info("service recovered",
 			"service", name,
-			"duration", duration,
+			"was_down_for", time.Since(status.LastFailover),
 		)
 	}
 
+	status.Healthy = true
+	status.ConsecutiveFails = 0
+	status.Message = "healthy"
+
+	fm.logger.Debug("health check passed",
+		"service", name,
+		"duration", duration,
+	)
+
 	fm.healthStatus[name] = status
+	fm.mu.Unlock()
 }
 
 // triggerFailover triggers failover for a service

@@ -41,15 +41,16 @@ func NewPostgresStore(logger *slog.Logger, config PostgresConfig) (*PostgresStor
 		return nil, fmt.Errorf("postgres DSN is required")
 	}
 
-	// Set defaults
+	// Set defaults optimized for production workload
+	// Allow ~100 concurrent connections for high traffic scenarios
 	if config.MaxOpenConns == 0 {
-		config.MaxOpenConns = 25
+		config.MaxOpenConns = 100
 	}
 	if config.MaxIdleConns == 0 {
-		config.MaxIdleConns = 5
+		config.MaxIdleConns = 25 // 25% of max for warm pool
 	}
 	if config.ConnMaxLifetime == 0 {
-		config.ConnMaxLifetime = 5 * time.Minute
+		config.ConnMaxLifetime = 15 * time.Minute // Balance reuse vs staleness
 	}
 
 	// Open connection

@@ -80,6 +80,17 @@ type CircuitBreaker struct {
 
 // NewCircuitBreaker creates a new circuit breaker.
 func NewCircuitBreaker(logger *slog.Logger, config CircuitBreakerConfig) *CircuitBreaker {
+	// Validate config values fit in int32 to prevent overflow
+	if config.MaxFailures < 0 || config.MaxFailures > 1000000 {
+		config.MaxFailures = 5 // Use safe default
+	}
+	if config.MaxRequests < 0 || config.MaxRequests > 1000000 {
+		config.MaxRequests = 3 // Use safe default
+	}
+	if config.SuccessThreshold < 0 || config.SuccessThreshold > 1000000 {
+		config.SuccessThreshold = 2 // Use safe default
+	}
+
 	cb := &CircuitBreaker{
 		config: config,
 		logger: logger.With("component", "circuit_breaker"),
@@ -152,6 +163,7 @@ func (cb *CircuitBreaker) beforeRequest(ctx context.Context) error {
 
 	case StateHalfOpen:
 		// Check if we've reached max requests in half-open state
+		// #nosec G115 - MaxRequests validated in NewCircuitBreaker to be <= 1000000
 		if cb.requests.Load() >= int32(cb.config.MaxRequests) {
 			return fmt.Errorf("circuit breaker is half-open and at capacity")
 		}
@@ -178,6 +190,7 @@ func (cb *CircuitBreaker) afterRequest(err error) {
 	// Check if we need to transition states
 	switch state {
 	case StateClosed:
+		// #nosec G115 - MaxFailures validated in NewCircuitBreaker to be <= 1000000
 		if cb.failures.Load() >= int32(cb.config.MaxFailures) {
 			cb.mu.Lock()
 			cb.openedAt = time.Now()
@@ -192,6 +205,7 @@ func (cb *CircuitBreaker) afterRequest(err error) {
 			cb.openedAt = time.Now()
 			cb.mu.Unlock()
 			cb.setState(StateOpen)
+			// #nosec G115 - SuccessThreshold validated in NewCircuitBreaker
 		} else if cb.successes.Load() >= int32(cb.config.SuccessThreshold) {
 			// Enough successes to close the circuit
 			cb.setState(StateClosed)
@@ -227,6 +241,7 @@ func (cb *CircuitBreaker) onFailure(err error) {
 
 	case StateHalfOpen:
 		// Any failure in half-open resets the circuit
+		// #nosec G115 - MaxFailures validated in NewCircuitBreaker to be <= 1000000
 		cb.failures.Store(int32(cb.config.MaxFailures))
 	}
 }

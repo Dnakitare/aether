@@ -164,7 +164,7 @@ func (v *VM) Start(ctx context.Context) error {
 
 	// Wait for VM to be ready
 	if err := v.waitForReady(ctx, 30*time.Second); err != nil {
-		v.Stop(ctx, 5*time.Second)
+		_ = v.Stop(ctx, 5*time.Second) // Best effort cleanup
 		return fmt.Errorf("VM failed to become ready: %w", err)
 	}
 

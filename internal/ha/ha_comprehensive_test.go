@@ -744,13 +744,13 @@ func TestFailoverManagerBasics(t *testing.T) {
 
 		fm := ha.NewFailoverManager(logger, nil, nil, config)
 
-		// Service fails first 3 times, then recovers
+		// Service fails first 5 times, then recovers
 		checkCount := int32(0)
 		check := &ha.HealthCheck{
 			Name: "recovering-service",
 			Check: func(ctx context.Context) error {
 				count := atomic.AddInt32(&checkCount, 1)
-				if count <= 3 {
+				if count <= 5 {
 					return errors.New("temporarily unhealthy")
 				}
 				return nil
@@ -765,7 +765,8 @@ func TestFailoverManagerBasics(t *testing.T) {
 
 		go fm.Start(ctx)
 
-		// Wait for initial failures
+		// Wait for initial failures (check runs at 0ms, 200ms, 400ms, 600ms)
+		// After 800ms, should have failed 4-5 times, still unhealthy
 		time.Sleep(800 * time.Millisecond)
 		assert.False(t, fm.IsHealthy("recovering-service"))
 

@@ -23,8 +23,8 @@ func TestBackupRestore_CompleteWorkflow(t *testing.T) {
 	env := SetupTestEnvironment(t)
 	defer env.TearDown()
 
-	// Skip if PostgreSQL not available
-	env.SkipIfNoInfrastructure("postgres")
+	// Skip if PostgreSQL or Redis not available
+	env.SkipIfNoInfrastructure("postgres", "redis")
 
 	ctx := context.Background()
 
@@ -137,7 +137,7 @@ func TestBackupRestore_PointInTime(t *testing.T) {
 	env := SetupTestEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("postgres")
+	env.SkipIfNoInfrastructure("postgres", "redis")
 
 	ctx := context.Background()
 
@@ -197,7 +197,7 @@ func TestBackupRestore_DisasterRecovery(t *testing.T) {
 	env := SetupTestEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("postgres")
+	env.SkipIfNoInfrastructure("postgres", "redis")
 
 	ctx := context.Background()
 
@@ -272,7 +272,7 @@ func TestBackupRestore_ConcurrentOperations(t *testing.T) {
 	env := SetupTestEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("postgres")
+	env.SkipIfNoInfrastructure("postgres", "redis")
 
 	ctx := context.Background()
 
@@ -343,7 +343,7 @@ func TestBackupRestore_ErrorHandling(t *testing.T) {
 	env := SetupTestEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("postgres")
+	env.SkipIfNoInfrastructure("postgres", "redis")
 
 	ctx := context.Background()
 
@@ -394,7 +394,7 @@ func TestBackupRestore_Compression(t *testing.T) {
 	env := SetupTestEnvironment(t)
 	defer env.TearDown()
 
-	env.SkipIfNoInfrastructure("postgres")
+	env.SkipIfNoInfrastructure("postgres", "redis")
 
 	ctx := context.Background()
 

@@ -87,7 +87,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create shard manager: %w", err)
 		}
-		defer shardManager.Stop(ctx)
+		defer func() {
+			if err := shardManager.Stop(ctx); err != nil {
+				logger.Error("failed to stop shard manager", "error", err)
+			}
+		}()
 
 		if err := shardManager.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start shard manager: %w", err)
@@ -108,7 +112,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create node registry: %w", err)
 		}
-		defer nodeRegistry.Close()
+		defer func() {
+			if err := nodeRegistry.Close(); err != nil {
+				logger.Error("failed to close node registry", "error", err)
+			}
+		}()
 
 		logger.InfoContext(ctx, "node registry initialized")
 
@@ -128,17 +136,86 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create queue: %w", err)
 		}
-		defer queue.Stop(ctx)
+		defer func() {
+			if err := queue.Stop(ctx); err != nil {
+				logger.Error("failed to stop queue", "error", err)
+			}
+		}()
 
 		// Register placement handler
-		// TODO: Wire up actual placement logic from runtime
+		placer := scheduler.NewPlacer(scheduler.BinPacking)
 		queue.RegisterHandler(func(ctx context.Context, req *distributed.SchedulingRequest) error {
 			logger.InfoContext(ctx, "received scheduling request",
 				"agent_id", req.AgentID,
 				"tenant_id", req.TenantID,
 			)
-			// Placeholder - actual implementation will use nodeRegistry.TryAllocate
-			return fmt.Errorf("not yet implemented")
+
+			// Get available nodes for this scheduler instance
+			nodes, err := nodeRegistry.GetOwnedNodes(ctx, cfg.Scheduler.SchedulerID)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to get owned nodes",
+					"scheduler_id", cfg.Scheduler.SchedulerID,
+					"error", err,
+				)
+				return fmt.Errorf("failed to get nodes: %w", err)
+			}
+
+			if len(nodes) == 0 {
+				logger.WarnContext(ctx, "no nodes available for scheduling",
+					"scheduler_id", cfg.Scheduler.SchedulerID,
+				)
+				return fmt.Errorf("no nodes available")
+			}
+
+			// Convert SchedulingRequest to AgentRequest for placement
+			agentReq := &scheduler.AgentRequest{
+				Config: api.AgentConfig{
+					ID:       req.AgentID,
+					TenantID: req.TenantID,
+				},
+				Resources:   req.Resources,
+				Constraints: req.Constraints,
+				Priority:    req.Priority,
+				CreatedAt:   time.Now(),
+			}
+
+			// Select best node using placement strategy
+			selectedNode, err := placer.SelectNode(agentReq, nodes)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to select node",
+					"agent_id", req.AgentID,
+					"available_nodes", len(nodes),
+					"error", err,
+				)
+				return fmt.Errorf("failed to select node: %w", err)
+			}
+
+			// Try to allocate agent on the selected node
+			success, err := nodeRegistry.TryAllocate(ctx, selectedNode.ID, req.AgentID, req.Resources)
+			if err != nil {
+				logger.ErrorContext(ctx, "failed to allocate agent",
+					"agent_id", req.AgentID,
+					"node_id", selectedNode.ID,
+					"error", err,
+				)
+				return fmt.Errorf("failed to allocate: %w", err)
+			}
+
+			if !success {
+				logger.WarnContext(ctx, "allocation failed - node resources changed",
+					"agent_id", req.AgentID,
+					"node_id", selectedNode.ID,
+				)
+				return fmt.Errorf("allocation failed due to concurrent modification")
+			}
+
+			logger.InfoContext(ctx, "agent successfully scheduled",
+				"agent_id", req.AgentID,
+				"node_id", selectedNode.ID,
+				"tenant_id", req.TenantID,
+			)
+
+			return nil
 		})
 
 		if err := queue.Start(ctx); err != nil {
@@ -151,6 +228,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Initialize PostgreSQL state store (Alpha: use environment variable or default)
 	postgresURL := os.Getenv("DATABASE_URL")
 	if postgresURL == "" {
+		// #nosec G101 - Default development credentials, overridden by DATABASE_URL env var in production
 		postgresURL = "postgres://postgres:postgres@localhost:5432/aether?sslmode=disable"
 	}
 
@@ -165,7 +243,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create postgres store: %w", err)
 	}
-	defer stateStore.Close()
+	defer func() {
+		if err := stateStore.Close(); err != nil {
+			logger.Error("failed to close state store", "error", err)
+		}
+	}()
 
 	logger.InfoContext(ctx, "postgres store initialized")
 
@@ -188,7 +270,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create runtime: %w", err)
 	}
-	defer rt.Shutdown(ctx)
+	defer func() {
+		if err := rt.Shutdown(ctx); err != nil {
+			logger.Error("failed to shutdown runtime", "error", err)
+		}
+	}()
 
 	logger.InfoContext(ctx, "runtime initialized")
 
@@ -263,7 +349,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err := apiSrv.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start API server: %w", err)
 	}
-	defer apiSrv.Stop(ctx)
+	defer func() {
+		if err := apiSrv.Stop(ctx); err != nil {
+			logger.Error("failed to stop API server", "error", err)
+		}
+	}()
 
 	logger.InfoContext(ctx, "Aether server started successfully")
 	logger.InfoContext(ctx, "scheduler mode", "mode", cfg.Scheduler.Mode)
