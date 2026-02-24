@@ -208,16 +208,27 @@ func TestChaos_EtcdFailure(t *testing.T) {
 		err = env.SimulateEtcdFailure()
 		require.NoError(t, err)
 
-		// HA operations may continue with cached state (resilient design)
-		// or may fail - both are acceptable behaviors
-		isLeaderAfterFailure, err := env.HA.IsLeader(ctx)
-		if err != nil {
-			env.T.Log("HA operations returned error with etcd down (fail-fast)")
-		} else {
-			env.T.Logf("HA operations continued with cached state (resilient): isLeader=%v", isLeaderAfterFailure)
+		// Give etcd client time to detect failure
+		time.Sleep(1 * time.Second)
+
+		// HA operations should eventually fail (may succeed initially due to caching)
+		// Try multiple times to account for cached state
+		eventuallyFailed := false
+		for i := 0; i < 3; i++ {
+			_, err = env.HA.IsLeader(ctx)
+			if err != nil {
+				eventuallyFailed = true
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
 		}
 
-		env.T.Log("HA operations handled etcd failure gracefully")
+		// Note: It's acceptable if leadership state is cached briefly
+		if eventuallyFailed {
+			env.T.Log("HA operations failed as expected with etcd down")
+		} else {
+			env.T.Log("HA operations resilient to transient etcd failure (cached state)")
+		}
 	})
 
 	t.Run("system recovers after etcd restored", func(t *testing.T) {

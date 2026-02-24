@@ -313,7 +313,7 @@ func (cm *CheckpointManager) ListCheckpoints(ctx context.Context, agentID api.Ag
 	}
 	defer rows.Close()
 
-	var checkpoints []*Checkpoint
+	checkpoints := make([]*Checkpoint, 0)
 	for rows.Next() {
 		var cp Checkpoint
 		if err := rows.Scan(&cp.ID, &cp.AgentID, &cp.TenantID, &cp.Version, &cp.CreatedAt, &cp.Size); err != nil {

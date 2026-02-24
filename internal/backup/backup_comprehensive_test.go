@@ -87,11 +87,6 @@ func setupTestRestoreManager(t *testing.T, backupDir string) (*RestoreManager, *
 		t.Skip("PostgreSQL not available for testing:", err)
 	}
 
-	// Try to ping database
-	if err := db.Ping(); err != nil {
-		t.Skip("PostgreSQL not available (ping failed):", err)
-	}
-
 	// Setup miniredis
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
@@ -935,11 +930,10 @@ func TestBackupCompression(t *testing.T) {
 
 		db, err := sql.Open("postgres", "postgres://postgres:postgres@localhost:5432/aether_test?sslmode=disable")
 		if err != nil {
-			t.Skip("PostgreSQL not available:", err)
+			t.Skip("PostgreSQL not available")
 		}
 		defer db.Close()
 
-		// Try to ping database
 		if err := db.Ping(); err != nil {
 			t.Skip("PostgreSQL not available (ping failed):", err)
 		}

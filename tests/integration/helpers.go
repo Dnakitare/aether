@@ -397,15 +397,13 @@ func AssertEventually(t *testing.T, condition func() bool, timeout time.Duration
 			return
 		}
 
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				msg := "Condition never became true"
-				if len(msgAndArgs) > 0 {
-					msg = fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
-				}
-				t.Fatal(msg)
+		<-ticker.C
+		if time.Now().After(deadline) {
+			msg := "Condition never became true"
+			if len(msgAndArgs) > 0 {
+				msg = fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
 			}
+			t.Fatal(msg)
 		}
 	}
 }

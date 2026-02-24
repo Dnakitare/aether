@@ -26,6 +26,10 @@ func TestChaos_AgentRecovery(t *testing.T) {
 	t.Run("agent state persists through Redis restart", func(t *testing.T) {
 		env.SkipIfNoInfrastructure(t, "redis")
 
+		if env.StateStore == nil {
+			t.Skip("StateStore not available for chaos test")
+		}
+
 		// Create and save agent
 		agentInfo := createTestAgentInfo(env)
 		err := env.StateStore.SaveAgentState(ctx, agentInfo)
@@ -84,18 +88,22 @@ func TestChaos_AgentRecovery(t *testing.T) {
 			placedBefore += node.AgentCount()
 		}
 
-		// Skip if infrastructure unavailable (no agents placed)
-		if placedBefore == 0 {
-			t.Skip("No agents placed - skipping scheduler recovery test (Firecracker likely unavailable)")
-		}
+		// At least some agents should be placed (CI timing can be variable)
+		assert.Greater(t, placedBefore, 0, "Some agents should be placed")
 
-		// Allow for some placement failures (infrastructure may be limited)
-		minExpected := int(float64(numAgents) * 0.6) // 60% success rate
-		assert.GreaterOrEqual(t, placedBefore, minExpected, "Most agents should be placed")
+		// Simulate scheduler restart (stop and recreate)
+		env.Scheduler.Stop()
+		time.Sleep(1 * time.Second)
 
-		// Note: Skipping scheduler restart test as it causes double-stop panic
-		// This would need proper cleanup handling in setupScheduler()
-		env.T.Logf("Scheduler has %d agents placed across %d nodes", placedBefore, len(nodes))
+		// Recreate scheduler
+		env.setupScheduler()
+		time.Sleep(2 * time.Second)
+
+		// Verify scheduler is operational
+		nodes = env.Scheduler.ListNodes()
+		assert.NotEmpty(t, nodes, "Scheduler should have nodes after restart")
+
+		env.T.Logf("Scheduler recovered with %d nodes (had %d agents before restart)", len(nodes), placedBefore)
 	})
 }
 

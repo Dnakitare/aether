@@ -142,7 +142,6 @@ func (env *ChaosEnvironment) setupInfrastructure() {
 
 // setupAuth creates JWT manager
 func (env *ChaosEnvironment) setupAuth() {
-	// #nosec G101 - Test secret key for chaos testing, not production
 	config := auth.Config{
 		SecretKey:     "chaos-test-secret-key-12345",
 		TokenDuration: 1 * time.Hour,
@@ -194,6 +193,13 @@ func (env *ChaosEnvironment) setupScheduler() {
 	go env.Scheduler.Start(ctx)
 
 	env.Cleanup = append(env.Cleanup, func() {
+		// Use recover to handle potential double-stop
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore panic from closing already-closed channel
+				env.T.Logf("Scheduler stop recovered from panic (likely already stopped): %v", r)
+			}
+		}()
 		env.Scheduler.Stop()
 	})
 }
@@ -263,6 +269,7 @@ func (env *ChaosEnvironment) CreateTestAgent(name string) *pkgapi.AgentConfig {
 
 // SkipIfNoInfrastructure skips test if required infrastructure is unavailable
 func (env *ChaosEnvironment) SkipIfNoInfrastructure(t *testing.T, services ...string) {
+	t.Helper()
 	for _, service := range services {
 		switch service {
 		case "postgres", "postgresql":
@@ -309,15 +316,13 @@ func AssertEventually(t *testing.T, condition func() bool, timeout time.Duration
 			return
 		}
 
-		select {
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				msg := "Condition never became true"
-				if len(msgAndArgs) > 0 {
-					msg = fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
-				}
-				t.Fatal(msg)
+		<-ticker.C
+		if time.Now().After(deadline) {
+			msg := "Condition never became true"
+			if len(msgAndArgs) > 0 {
+				msg = fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
 			}
+			t.Fatal(msg)
 		}
 	}
 }

@@ -1,4 +1,3 @@
-// Package main provides a migration runner for database schema updates.
 package main
 
 import (
@@ -22,11 +21,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Printf("failed to close database: %v", err)
-		}
-	}()
+	defer db.Close()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
@@ -35,8 +30,7 @@ func main() {
 
 	fmt.Println("Running migrations...")
 	if err := database.RunMigrations(logger, db, config); err != nil {
-		fmt.Printf("migration failed: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("migration failed: %v", err)
 	}
 
 	fmt.Println("Migrations completed successfully!")

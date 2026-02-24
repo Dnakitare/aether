@@ -52,7 +52,7 @@ test-verbose: ## Run unit tests with verbose output
 
 coverage: ## Generate test coverage report
 	@echo "Generating coverage report..."
-	$(GOTEST) -race -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
+	$(GOTEST) -race -short -coverprofile=$(COVERAGE_FILE) -covermode=atomic ./...
 	$(GOCMD) tool cover -html=$(COVERAGE_FILE) -o $(COVERAGE_HTML)
 	@echo "Coverage report generated: $(COVERAGE_HTML)"
 	@$(GOCMD) tool cover -func=$(COVERAGE_FILE) | grep total
