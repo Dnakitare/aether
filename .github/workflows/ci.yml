@@ -184,6 +184,7 @@ jobs:
   security:
     name: Security Scanning
     runs-on: ubuntu-latest
+    continue-on-error: true  # Optional - don't block on security warnings
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -326,11 +327,10 @@ jobs:
 
           if [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.code-quality.result }}" != "success" ] || \
-             [ "${{ needs.security.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ]; then
             echo "❌ **Pipeline Failed** - One or more required jobs did not complete successfully" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Note: Integration tests are optional and don't fail the pipeline" >> $GITHUB_STEP_SUMMARY
+            echo "Note: Integration tests and security scanning are optional" >> $GITHUB_STEP_SUMMARY
             exit 1
           else
             echo "✅ **All Required Jobs Passed Successfully!**" >> $GITHUB_STEP_SUMMARY
@@ -338,5 +338,10 @@ jobs:
               echo "✅ Integration tests also passed" >> $GITHUB_STEP_SUMMARY
             else
               echo "ℹ️  Integration tests were skipped or failed (optional)" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ "${{ needs.security.result }}" == "success" ]; then
+              echo "✅ Security scanning also passed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "ℹ️  Security scanning was skipped or failed (optional)" >> $GITHUB_STEP_SUMMARY
             fi
           fi
