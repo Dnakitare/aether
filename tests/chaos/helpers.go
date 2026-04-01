@@ -281,7 +281,9 @@ func (env *ChaosEnvironment) SkipIfNoInfrastructure(t *testing.T, services ...st
 				t.Skip("Redis not available for chaos test")
 			}
 		case "etcd":
-			if env.EtcdClient == nil {
+			// EtcdClient uses lazy connection so non-nil doesn't mean etcd is reachable.
+			// env.HA being nil means NewLeaderElection failed (etcd actually unavailable).
+			if env.EtcdClient == nil || env.HA == nil {
 				t.Skip("etcd not available for chaos test")
 			}
 		}

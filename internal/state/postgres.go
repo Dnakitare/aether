@@ -134,6 +134,7 @@ func (ps *PostgresStore) GetAgent(ctx context.Context, agentID api.AgentID) (*ap
 	var startedAt, stoppedAt sql.NullTime
 	var errMsg sql.NullString
 
+	var updatedAt time.Time
 	err := ps.db.QueryRowContext(ctx, query, agentID).Scan(
 		&info.Config.ID,
 		&info.Config.TenantID,
@@ -142,7 +143,7 @@ func (ps *PostgresStore) GetAgent(ctx context.Context, agentID api.AgentID) (*ap
 		&info.Status,
 		&configJSON,
 		&info.CreatedAt,
-		&info.CreatedAt, // updated_at (not exposed in AgentInfo)
+		&updatedAt,
 		&startedAt,
 		&stoppedAt,
 		&errMsg,

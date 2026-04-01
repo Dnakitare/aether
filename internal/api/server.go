@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -241,9 +242,12 @@ func (s *Server) respondError(w http.ResponseWriter, status int, message string)
 	})
 }
 
-// parseJSON parses JSON from request body.
+// maxRequestBodySize is the maximum allowed request body size (10 MB).
+const maxRequestBodySize = 10 << 20
+
+// parseJSON parses JSON from request body with a size limit to prevent DoS.
 func (s *Server) parseJSON(r *http.Request, v interface{}) error {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxRequestBodySize)).Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 	return nil

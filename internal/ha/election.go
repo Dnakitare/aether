@@ -262,14 +262,26 @@ func (lm *LeadershipManager) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			default:
-				if err := lm.election.Campaign(ctx); err != nil {
-					if ctx.Err() != nil {
-						return
-					}
-					lm.logger.Error("campaign failed, retrying", "error", err)
-					time.Sleep(5 * time.Second)
-				}
 			}
+
+			if err := lm.election.Campaign(ctx); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				lm.logger.Error("campaign failed, retrying", "error", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+				continue
+			}
+
+			// Successfully became leader; hold until context is cancelled.
+			// Leadership is maintained by the etcd session TTL — no need to
+			// re-campaign until we lose it or the context ends.
+			<-ctx.Done()
+			return
 		}
 	}()
 
