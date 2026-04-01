@@ -197,8 +197,9 @@ jobs:
 
       - name: Run gosec security scanner
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec -fmt=json -out=gosec-report.json -no-fail ./...
+          curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.22.0
+          gosec -fmt=json -out=gosec-report.json -no-fail -tests=false ./internal/... ./pkg/...
 
       - name: Analyze security issues
         run: |

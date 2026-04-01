@@ -20,7 +20,7 @@
 # - Only essential files copied
 
 # Build arguments for versioning and metadata
-ARG GO_VERSION=1.22
+ARG GO_VERSION=1.24
 ARG VERSION=0.2.0-beta
 ARG COMMIT_SHA=unknown
 ARG BUILD_DATE=unknown
