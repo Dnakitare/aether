@@ -84,6 +84,7 @@ jobs:
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
+      image-ref: ${{ steps.image-ref.outputs.ref }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -129,12 +130,15 @@ jobs:
       - name: Sign image
         uses: sigstore/cosign-installer@main
 
-      - name: Sign the image with Cosign
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+      - name: Set image ref output
+        id: image-ref
         run: |
-          IMAGE_REF="${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')@${DIGEST}"
-          cosign sign --yes "${IMAGE_REF}"
+          IMAGE_REF="${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')@${{ steps.build.outputs.digest }}"
+          echo "ref=${IMAGE_REF}" >> $GITHUB_OUTPUT
+
+      - name: Sign the image with Cosign
+        run: |
+          cosign sign --yes "${{ steps.image-ref.outputs.ref }}"
 
   security-scan:
     name: Security Scan
@@ -142,10 +146,17 @@ jobs:
     needs: docker-build
     continue-on-error: true
     steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Run Trivy scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ needs.docker-build.outputs.image-tag }}
+          image-ref: ${{ needs.docker-build.outputs.image-ref }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
@@ -163,6 +174,7 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: [docker-build, security-scan]
+    if: ${{ secrets.AWS_STAGING_ROLE_ARN != '' }}
     environment:
       name: staging
       url: https://staging.aether.example.com
@@ -224,7 +236,7 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     needs: [docker-build, deploy-staging]
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    if: ${{ secrets.AWS_PRODUCTION_ROLE_ARN != '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     environment:
       name: production
       url: https://aether.example.com
