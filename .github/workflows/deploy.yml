@@ -44,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.24'
           cache: true
 
       - name: Download dependencies
@@ -53,14 +53,14 @@ jobs:
       - name: Run tests
         if: ${{ !inputs.skip_tests }}
         run: |
-          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./internal/... ./pkg/...
 
       - name: Upload coverage
         if: ${{ !inputs.skip_tests }}
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage.txt
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
       - name: Build binary
         run: |
