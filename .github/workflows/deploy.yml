@@ -130,9 +130,11 @@ jobs:
         uses: sigstore/cosign-installer@main
 
       - name: Sign the image with Cosign
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          cosign sign --yes \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REF="${{ env.REGISTRY }}/$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')@${DIGEST}"
+          cosign sign --yes "${IMAGE_REF}"
 
   security-scan:
     name: Security Scan
