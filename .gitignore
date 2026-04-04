@@ -19,6 +19,15 @@ go.work
 /dist/
 /build/
 
+# Compiled binaries in repo root
+/aether
+/docker
+/load.test
+
+# Coverage reports
+coverage*.out
+coverage*.html
+
 # Dependency directories
 vendor/
 

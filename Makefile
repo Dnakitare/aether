@@ -16,7 +16,10 @@ GOCLEAN=$(GOCMD) clean
 GOINSTALL=$(GOCMD) install
 
 # Build flags
-LDFLAGS=-ldflags "-s -w"
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS=-ldflags "-s -w -X 'main.Version=$(VERSION)' -X 'main.CommitSHA=$(COMMIT_SHA)' -X 'main.BuildDate=$(BUILD_DATE)'"
 BUILD_FLAGS=-trimpath $(LDFLAGS)
 
 help: ## Show this help message
