@@ -8,7 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/aether-runtime/aether/internal/observability"
+	"github.com/dnakitare/aether/internal/observability"
 )
 
 func TestTracerProvider(t *testing.T) {

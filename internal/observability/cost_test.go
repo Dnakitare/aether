@@ -3,7 +3,7 @@ package observability_test
 import (
 	"testing"
 
-	"github.com/aether-runtime/aether/internal/observability"
+	"github.com/dnakitare/aether/internal/observability"
 )
 
 func TestDefaultPricing(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/aether-runtime/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/auth"
 )
 
 // Middleware creates HTTP middleware for audit logging.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/segmentio/kafka-go"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // KafkaConfig holds Kafka configuration.

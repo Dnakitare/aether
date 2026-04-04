@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/messaging"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/messaging"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 func TestKafkaConfig(t *testing.T) {

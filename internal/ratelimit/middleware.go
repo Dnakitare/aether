@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // TenantTierProvider is an interface for looking up tenant tiers.
@@ -58,12 +60,12 @@ func MiddlewareWithConfig(config MiddlewareConfig) func(http.Handler) http.Handl
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
-			// Extract tenant ID from context or header
+			// Extract tenant ID from context or header.
+			// Fall back to the client IP so unauthenticated endpoints
+			// (e.g. POST /v1/auth/token) are still rate-limited.
 			tenantID := extractTenantID(r)
 			if tenantID == "" {
-				// No tenant ID, skip rate limiting
-				next.ServeHTTP(w, r)
-				return
+				tenantID = extractClientIP(r)
 			}
 
 			// Extract user ID from context or header
@@ -121,6 +123,26 @@ func extractTenantID(r *http.Request) api.TenantID {
 	}
 
 	return ""
+}
+
+// extractClientIP returns the client IP address as a synthetic tenant ID for
+// unauthenticated requests, enabling IP-based rate limiting.
+func extractClientIP(r *http.Request) api.TenantID {
+	// Prefer X-Forwarded-For set by a trusted proxy.
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// The header may contain a comma-separated list; take the first entry.
+		ip := strings.SplitN(xff, ",", 2)[0]
+		ip = strings.TrimSpace(ip)
+		if ip != "" {
+			return api.TenantID("ip:" + ip)
+		}
+	}
+	// Fall back to the direct remote address.
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return api.TenantID("ip:" + r.RemoteAddr)
+	}
+	return api.TenantID("ip:" + host)
 }
 
 // extractUserID extracts user ID from request.

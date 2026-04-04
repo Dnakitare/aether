@@ -5,12 +5,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
+
+// ErrNotSupported is returned when a checkpoint operation requires
+// infrastructure (e.g., Firecracker memory snapshots) that is not
+// available in the current deployment. Application-layer checkpoints
+// (JSON state blobs) are always supported.
+var ErrNotSupported = errors.New("operation requires Firecracker infrastructure and is not available")
 
 // CheckpointManager manages agent state checkpoints.
 type CheckpointManager struct {

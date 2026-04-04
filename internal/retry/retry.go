@@ -2,6 +2,8 @@ package retry
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"math"
@@ -187,9 +189,13 @@ func DoWithValue[T any](ctx context.Context, logger *slog.Logger, config Config,
 	return result, lastErr
 }
 
-// randomFloat returns a random float between 0.0 and 1.0
+// randomFloat returns a cryptographically random float in [0.0, 1.0).
 func randomFloat() float64 {
-	// Use a simple pseudo-random generator
-	// In production, consider using crypto/rand for better randomness
-	return math.Sin(float64(time.Now().UnixNano()))*0.5 + 0.5
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		// Fall back to time-based jitter on the extremely unlikely read failure.
+		return math.Abs(math.Sin(float64(time.Now().UnixNano())))
+	}
+	// Use top 53 bits for a uniform float64 in [0, 1).
+	return float64(binary.BigEndian.Uint64(b[:])>>11) / (1 << 53)
 }

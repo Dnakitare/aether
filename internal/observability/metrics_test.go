@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/observability"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/observability"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 func TestMetricsCollector(t *testing.T) {

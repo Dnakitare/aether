@@ -3,7 +3,7 @@ package api_test
 import (
 	"testing"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 func TestAgentStatus(t *testing.T) {

@@ -14,8 +14,8 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/aether-runtime/aether/internal/ratelimit"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/ratelimit"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // ============================================================================
