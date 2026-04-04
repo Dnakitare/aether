@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // RedisStore provides state persistence using Redis.

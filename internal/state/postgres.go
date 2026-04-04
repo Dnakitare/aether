@@ -11,7 +11,7 @@ import (
 
 	_ "github.com/lib/pq"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // PostgresStore provides durable state persistence using PostgreSQL.
@@ -84,8 +84,34 @@ func (ps *PostgresStore) Close() error {
 	return ps.db.Close()
 }
 
+// DB returns the underlying *sql.DB for health checks and migrations.
+func (ps *PostgresStore) DB() *sql.DB {
+	return ps.db
+}
+
+// UpsertTenant ensures a tenant row exists, inserting one if it doesn't.
+// This satisfies the FK constraint on the agents table without requiring a
+// separate tenant-management API call before every agent creation.
+func (ps *PostgresStore) UpsertTenant(ctx context.Context, tenantID api.TenantID) error {
+	query := `
+		INSERT INTO tenants (id, name, tier, created_at, updated_at)
+		VALUES ($1, $1, 'free', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING
+	`
+	_, err := ps.db.ExecContext(ctx, query, tenantID)
+	if err != nil {
+		return fmt.Errorf("failed to upsert tenant: %w", err)
+	}
+	return nil
+}
+
 // CreateAgent creates a new agent record in the database.
 func (ps *PostgresStore) CreateAgent(ctx context.Context, config api.AgentConfig) error {
+	// Ensure the tenant row exists before inserting the agent (FK constraint).
+	if err := ps.UpsertTenant(ctx, config.TenantID); err != nil {
+		return err
+	}
+
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent config: %w", err)
@@ -243,6 +269,144 @@ func (ps *PostgresStore) ListAgents(ctx context.Context, tenantID api.TenantID) 
 		"tenant_id", tenantID,
 		"count", len(agents),
 	)
+
+	return agents, nil
+}
+
+// ListAgentsPage retrieves a page of agents for a tenant using database-level
+// LIMIT/OFFSET, along with the total count for pagination metadata.
+func (ps *PostgresStore) ListAgentsPage(ctx context.Context, tenantID api.TenantID, limit, offset int) ([]*api.AgentInfo, int, error) {
+	// Total count in a single round-trip.
+	var total int
+	if err := ps.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agents WHERE tenant_id = $1`, tenantID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count agents: %w", err)
+	}
+
+	query := `
+		SELECT id, tenant_id, name, image, status, config, created_at, updated_at, started_at, stopped_at, error
+		FROM agents
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := ps.db.QueryContext(ctx, query, tenantID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query agents: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []*api.AgentInfo
+
+	for rows.Next() {
+		var info api.AgentInfo
+		var configJSON []byte
+		var startedAt, stoppedAt sql.NullTime
+		var errMsg sql.NullString
+		var updatedAt time.Time
+
+		if err := rows.Scan(
+			&info.Config.ID,
+			&info.Config.TenantID,
+			&info.Config.Name,
+			&info.Config.Image,
+			&info.Status,
+			&configJSON,
+			&info.CreatedAt,
+			&updatedAt,
+			&startedAt,
+			&stoppedAt,
+			&errMsg,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan agent row: %w", err)
+		}
+
+		if err := json.Unmarshal(configJSON, &info.Config); err != nil {
+			return nil, 0, fmt.Errorf("failed to unmarshal agent config: %w", err)
+		}
+
+		if startedAt.Valid {
+			info.StartedAt = &startedAt.Time
+		}
+		if stoppedAt.Valid {
+			info.StoppedAt = &stoppedAt.Time
+		}
+		if errMsg.Valid {
+			info.Error = errMsg.String
+		}
+
+		agents = append(agents, &info)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating agents: %w", err)
+	}
+
+	return agents, total, nil
+}
+
+// ListAllAgents retrieves every agent across all tenants. Used for startup
+// reconciliation to repopulate the in-memory runtime map after a restart.
+func (ps *PostgresStore) ListAllAgents(ctx context.Context) ([]*api.AgentInfo, error) {
+	query := `
+		SELECT id, tenant_id, name, image, status, config, created_at, updated_at, started_at, stopped_at, error
+		FROM agents
+		ORDER BY created_at DESC
+	`
+
+	rows, err := ps.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query agents: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []*api.AgentInfo
+
+	for rows.Next() {
+		var info api.AgentInfo
+		var configJSON []byte
+		var startedAt, stoppedAt sql.NullTime
+		var errMsg sql.NullString
+		var updatedAt time.Time
+
+		if err := rows.Scan(
+			&info.Config.ID,
+			&info.Config.TenantID,
+			&info.Config.Name,
+			&info.Config.Image,
+			&info.Status,
+			&configJSON,
+			&info.CreatedAt,
+			&updatedAt,
+			&startedAt,
+			&stoppedAt,
+			&errMsg,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan agent row: %w", err)
+		}
+
+		if err := json.Unmarshal(configJSON, &info.Config); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal agent config: %w", err)
+		}
+
+		if startedAt.Valid {
+			info.StartedAt = &startedAt.Time
+		}
+		if stoppedAt.Valid {
+			info.StoppedAt = &stoppedAt.Time
+		}
+		if errMsg.Valid {
+			info.Error = errMsg.String
+		}
+
+		agents = append(agents, &info)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating agents: %w", err)
+	}
 
 	return agents, nil
 }

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/state"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/state"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // TestRedisStore tests Redis store operations.
