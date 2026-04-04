@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // QuotaManager manages resource quotas for tenants.
 type QuotaManager struct {
 	logger *slog.Logger
+	store  QuotaStore // optional; nil = in-memory only
 	mu     sync.RWMutex
 
 	// Quotas by tenant ID
@@ -76,19 +77,49 @@ type ResourceUsage struct {
 }
 
 // NewQuotaManager creates a new quota manager.
-func NewQuotaManager(logger *slog.Logger) *QuotaManager {
+// Pass a non-nil QuotaStore to persist limits and usage across restarts.
+func NewQuotaManager(logger *slog.Logger, store QuotaStore) *QuotaManager {
 	return &QuotaManager{
 		logger: logger.With("component", "quota_manager"),
+		store:  store,
 		quotas: make(map[api.TenantID]*Quota),
 		usage:  make(map[api.TenantID]*ResourceUsage),
 	}
 }
 
-// SetQuota sets or updates a quota for a tenant.
-func (qm *QuotaManager) SetQuota(quota *Quota) error {
+// LoadFromStore loads all quota limits and usage from the backing store into
+// the in-memory maps. Call once at startup after NewQuotaManager.
+func (qm *QuotaManager) LoadFromStore(ctx context.Context) error {
+	if qm.store == nil {
+		return nil
+	}
+
+	quotas, usages, err := qm.store.LoadAll(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load quotas from store: %w", err)
+	}
+
 	qm.mu.Lock()
 	defer qm.mu.Unlock()
 
+	for _, q := range quotas {
+		qm.quotas[q.TenantID] = q
+	}
+	for _, u := range usages {
+		qm.usage[u.TenantID] = u
+	}
+	// Ensure every tenant with a quota has a usage entry.
+	for tid := range qm.quotas {
+		if _, ok := qm.usage[tid]; !ok {
+			qm.usage[tid] = &ResourceUsage{TenantID: tid, LastUpdated: time.Now()}
+		}
+	}
+
+	return nil
+}
+
+// SetQuota sets or updates a quota for a tenant.
+func (qm *QuotaManager) SetQuota(ctx context.Context, quota *Quota) error {
 	if quota.TenantID == "" {
 		return fmt.Errorf("tenant ID is required")
 	}
@@ -103,22 +134,30 @@ func (qm *QuotaManager) SetQuota(quota *Quota) error {
 	}
 	quota.UpdatedAt = now
 
+	qm.mu.Lock()
 	qm.quotas[quota.TenantID] = quota
 
-	// Initialize usage if not exists
 	if _, exists := qm.usage[quota.TenantID]; !exists {
 		qm.usage[quota.TenantID] = &ResourceUsage{
 			TenantID:    quota.TenantID,
 			LastUpdated: now,
 		}
 	}
+	qm.mu.Unlock()
 
-	qm.logger.InfoContext(context.Background(),
+	qm.logger.InfoContext(ctx,
 		"quota updated",
 		"tenant_id", quota.TenantID,
 		"max_agents", quota.MaxAgents,
 		"tier", quota.Tier,
 	)
+
+	if qm.store != nil {
+		if err := qm.store.UpsertQuota(ctx, quota); err != nil {
+			qm.logger.WarnContext(ctx, "failed to persist quota",
+				"tenant_id", quota.TenantID, "error", err)
+		}
+	}
 
 	return nil
 }
@@ -147,6 +186,88 @@ func (qm *QuotaManager) GetUsage(tenantID api.TenantID) (*ResourceUsage, error) 
 	}
 
 	return usage, nil
+}
+
+// CheckAndAllocate atomically checks quota and allocates resources in a single
+// lock acquisition, preventing the TOCTOU race between separate Check + Allocate
+// calls under concurrent agent creation.
+func (qm *QuotaManager) CheckAndAllocate(ctx context.Context, tenantID api.TenantID, requested ResourceRequest) error {
+	qm.mu.Lock()
+
+	quota, exists := qm.quotas[tenantID]
+	if !exists {
+		qm.mu.Unlock()
+		return fmt.Errorf("no quota configured for tenant %s", tenantID)
+	}
+
+	usage, exists := qm.usage[tenantID]
+	if !exists {
+		qm.mu.Unlock()
+		return fmt.Errorf("usage tracking not initialized for tenant %s", tenantID)
+	}
+
+	// Check all dimensions before mutating anything.
+	if usage.AgentCount+requested.AgentCount > quota.MaxAgents {
+		qm.mu.Unlock()
+		return &QuotaExceededError{
+			TenantID:  tenantID,
+			Resource:  "agents",
+			Requested: int64(usage.AgentCount + requested.AgentCount),
+			Limit:     int64(quota.MaxAgents),
+		}
+	}
+	if usage.CPUCores+requested.CPUCores > quota.MaxCPUCores {
+		qm.mu.Unlock()
+		return &QuotaExceededError{
+			TenantID:  tenantID,
+			Resource:  "cpu_cores",
+			Requested: usage.CPUCores + requested.CPUCores,
+			Limit:     quota.MaxCPUCores,
+		}
+	}
+	if usage.MemoryMB+requested.MemoryMB > quota.MaxMemoryMB {
+		qm.mu.Unlock()
+		return &QuotaExceededError{
+			TenantID:  tenantID,
+			Resource:  "memory_mb",
+			Requested: usage.MemoryMB + requested.MemoryMB,
+			Limit:     quota.MaxMemoryMB,
+		}
+	}
+	if quota.MaxDiskMB > 0 && usage.DiskMB+requested.DiskMB > quota.MaxDiskMB {
+		qm.mu.Unlock()
+		return &QuotaExceededError{
+			TenantID:  tenantID,
+			Resource:  "disk_mb",
+			Requested: usage.DiskMB + requested.DiskMB,
+			Limit:     quota.MaxDiskMB,
+		}
+	}
+
+	// All checks passed — commit the allocation.
+	usage.AgentCount += requested.AgentCount
+	usage.CPUCores += requested.CPUCores
+	usage.MemoryMB += requested.MemoryMB
+	usage.DiskMB += requested.DiskMB
+	usage.LastUpdated = time.Now()
+	usageCopy := *usage
+	qm.mu.Unlock()
+
+	qm.logger.DebugContext(ctx, "quota checked and allocated",
+		"tenant_id", tenantID,
+		"agents", usageCopy.AgentCount,
+		"cpu_cores", usageCopy.CPUCores,
+		"memory_mb", usageCopy.MemoryMB,
+	)
+
+	if qm.store != nil {
+		if err := qm.store.UpsertUsage(ctx, tenantID, &usageCopy); err != nil {
+			qm.logger.WarnContext(ctx, "failed to persist quota usage after allocation",
+				"tenant_id", tenantID, "error", err)
+		}
+	}
+
+	return nil
 }
 
 // CheckQuota checks if a tenant can allocate the requested resources.
@@ -231,6 +352,14 @@ func (qm *QuotaManager) AllocateResources(ctx context.Context, tenantID api.Tena
 		"memory_mb", usage.MemoryMB,
 	)
 
+	if qm.store != nil {
+		usageCopy := *usage
+		if err := qm.store.UpsertUsage(ctx, tenantID, &usageCopy); err != nil {
+			qm.logger.WarnContext(ctx, "failed to persist quota usage after allocation",
+				"tenant_id", tenantID, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -271,6 +400,14 @@ func (qm *QuotaManager) ReleaseResources(ctx context.Context, tenantID api.Tenan
 		"cpu_cores", usage.CPUCores,
 		"memory_mb", usage.MemoryMB,
 	)
+
+	if qm.store != nil {
+		usageCopy := *usage
+		if err := qm.store.UpsertUsage(ctx, tenantID, &usageCopy); err != nil {
+			qm.logger.WarnContext(ctx, "failed to persist quota usage after release",
+				"tenant_id", tenantID, "error", err)
+		}
+	}
 
 	return nil
 }

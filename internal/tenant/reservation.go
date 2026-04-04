@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // ReservationManager manages resource reservations.

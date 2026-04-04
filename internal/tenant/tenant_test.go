@@ -7,16 +7,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/tenant"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/tenant"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 func TestQuotaManager(t *testing.T) {
+	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	}))
 
-	qm := tenant.NewQuotaManager(logger)
+	qm := tenant.NewQuotaManager(logger, nil)
 
 	// Set a quota
 	quota := &tenant.Quota{
@@ -27,7 +28,7 @@ func TestQuotaManager(t *testing.T) {
 		Tier:        "pro",
 	}
 
-	err := qm.SetQuota(quota)
+	err := qm.SetQuota(ctx, quota)
 	if err != nil {
 		t.Fatalf("Failed to set quota: %v", err)
 	}
@@ -43,7 +44,6 @@ func TestQuotaManager(t *testing.T) {
 	}
 
 	// Check quota (should pass)
-	ctx := context.Background()
 	request := tenant.ResourceRequest{
 		AgentCount: 2,
 		CPUCores:   2000,
@@ -73,11 +73,12 @@ func TestQuotaManager(t *testing.T) {
 }
 
 func TestQuotaExceeded(t *testing.T) {
+	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	}))
 
-	qm := tenant.NewQuotaManager(logger)
+	qm := tenant.NewQuotaManager(logger, nil)
 
 	// Set a small quota
 	quota := &tenant.Quota{
@@ -88,13 +89,12 @@ func TestQuotaExceeded(t *testing.T) {
 		Tier:        "free",
 	}
 
-	err := qm.SetQuota(quota)
+	err := qm.SetQuota(ctx, quota)
 	if err != nil {
 		t.Fatalf("Failed to set quota: %v", err)
 	}
 
 	// Try to exceed quota
-	ctx := context.Background()
 	request := tenant.ResourceRequest{
 		AgentCount: 5, // Exceeds MaxAgents
 		CPUCores:   5000,
