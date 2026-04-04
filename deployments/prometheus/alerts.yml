@@ -20,6 +20,23 @@ groups:
           summary: "Slow agent startup times"
           description: "P95 agent startup time is {{ $value }}s for tenant {{ $labels.tenant_id }}"
 
+      - alert: AgentFailureRateHigh
+        expr: rate(aether_agent_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent error rate elevated"
+          description: "{{ $value | humanize }} agent errors/sec"
+
+      - alert: AgentStartupSlowP95
+        expr: histogram_quantile(0.95, rate(aether_agent_startup_duration_seconds_bucket[10m])) > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 agent startup time exceeds 30s"
+
   - name: aether_api
     interval: 30s
     rules:
@@ -85,3 +102,33 @@ groups:
         annotations:
           summary: "Unexpected cost spike detected"
           description: "Cost rate is ${{ $value }}/hour for tenant {{ $labels.tenant_id }}"
+
+  - name: aether_security
+    rules:
+      - alert: AuthenticationFailureSpike
+        expr: rate(http_requests_total{status="401"}[5m]) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 401 rate — possible credential stuffing"
+          description: "{{ $value | humanize }} auth failures/sec on {{ $labels.instance }}"
+
+      - alert: RateLimitRejectionHigh
+        expr: rate(http_requests_total{status="429"}[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate limit rejection rate"
+          description: "{{ $value | humanize }} requests/sec being rate-limited"
+
+  - name: aether_database
+    rules:
+      - alert: PostgresConnectionsHigh
+        expr: pg_stat_database_numbackends / pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connections above 80%"

@@ -106,8 +106,8 @@ LABEL org.opencontainers.image.title="Aether Runtime" \
       org.opencontainers.image.vendor="Aether" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.source="https://github.com/aether-runtime/aether" \
-      org.opencontainers.image.documentation="https://github.com/aether-runtime/aether/blob/main/README.md" \
+      org.opencontainers.image.source="https://github.com/dnakitare/aether" \
+      org.opencontainers.image.documentation="https://github.com/dnakitare/aether/blob/main/README.md" \
       org.opencontainers.image.revision="${COMMIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.base.name="gcr.io/distroless/static:nonroot" \
@@ -115,4 +115,4 @@ LABEL org.opencontainers.image.title="Aether Runtime" \
 
 # Run the application
 ENTRYPOINT ["/usr/local/bin/aether"]
-CMD ["serve"]
+CMD ["server"]

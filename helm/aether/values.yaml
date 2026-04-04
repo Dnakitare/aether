@@ -19,7 +19,7 @@ apiServer:
 
   image:
     registry: ghcr.io
-    repository: aether-runtime/aether
+    repository: dnakitare/aether
     tag: "0.2.0-beta"
     pullPolicy: IfNotPresent
 
@@ -112,7 +112,7 @@ scheduler:
 
   image:
     registry: ghcr.io
-    repository: aether-runtime/aether
+    repository: dnakitare/aether
     tag: "0.2.0-beta"
     pullPolicy: IfNotPresent
 
@@ -155,6 +155,17 @@ scheduler:
     runAsNonRoot: true
     runAsUser: 1000
     fsGroup: 1000
+
+# Security configuration
+security:
+  # JWT secret key used to sign and verify API tokens.
+  # REQUIRED when auth is enabled. Must be at least 32 characters.
+  # Set via: --set security.jwtSecret=<your-secret>
+  # Or reference an existing Kubernetes secret with existingSecret.
+  jwtSecret: ""
+  # Reference an existing secret instead of setting jwtSecret directly.
+  # The secret must contain a key named "jwt-secret".
+  existingSecret: ""
 
 # PostgreSQL configuration
 postgresql:
@@ -290,14 +301,20 @@ networkPolicy:
 monitoring:
   # Enable Prometheus ServiceMonitor
   serviceMonitor:
-    enabled: false
+    enabled: true
     interval: 30s
     scrapeTimeout: 10s
     labels: {}
 
   # Enable Grafana dashboards
   grafanaDashboards:
-    enabled: false
+    enabled: true
+
+# Rate limiting configuration
+rateLimiting:
+  enabled: true
+  redis:
+    address: ""  # defaults to internal redis service
 
 # Configuration
 config:
