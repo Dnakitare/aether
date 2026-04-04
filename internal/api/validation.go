@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // Validation regex patterns
@@ -174,21 +174,21 @@ func ValidateAgentConfig(config api.AgentConfig) error {
 	return nil
 }
 
-// ValidateBootArgs validates VM boot arguments to prevent injection attacks.
+// ValidateBootArgs validates VM boot arguments using an allowlist.
+// Only kernel-style parameters (key=value pairs and flags) are permitted.
 func ValidateBootArgs(bootArgs string) error {
-	// Disallow potentially dangerous characters
-	dangerousChars := []string{";", "|", "&", "`", "$", "(", ")", "<", ">", "\n", "\r"}
-	for _, char := range dangerousChars {
-		if strings.Contains(bootArgs, char) {
-			return fmt.Errorf("boot arguments contain dangerous character: %s", char)
-		}
-	}
-
-	// Limit length to prevent abuse
 	if len(bootArgs) > 512 {
 		return fmt.Errorf("boot arguments too long (max 512 characters)")
 	}
-
+	if bootArgs == "" {
+		return nil
+	}
+	// Allowlist: alphanumeric, spaces, =, ., -, _, / (for paths like /dev/vda)
+	// This covers standard kernel params: console=ttyS0 root=/dev/vda ro quiet
+	bootArgsRegex := regexp.MustCompile(`^[a-zA-Z0-9 =._\-/,@:+]*$`)
+	if !bootArgsRegex.MatchString(bootArgs) {
+		return fmt.Errorf("boot arguments contain disallowed characters; only alphanumeric characters, spaces, and =._-/,:+@ are permitted")
+	}
 	return nil
 }
 
