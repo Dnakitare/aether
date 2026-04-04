@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/tenant"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // BulkCreateAgentsRequest represents a bulk agent creation request.
@@ -50,6 +51,18 @@ type BulkOperationSummary struct {
 }
 
 // handleBulkCreateAgents handles bulk agent creation.
+//
+// @Summary      Bulk create agents
+// @Description  Creates multiple agents in a single request (concurrently). Partial success is possible.
+// @Tags         agents
+// @Accept       json
+// @Produce      json
+// @Param        request  body      BulkCreateAgentsRequest  true  "Bulk create request"
+// @Success      200  {object}  BulkCreateAgentsResponse
+// @Failure      400  {object}  ProblemDetail
+// @Failure      401  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents/bulk/create [post]
 func (s *Server) handleBulkCreateAgents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -151,6 +164,29 @@ func (s *Server) bulkCreateAgents(ctx context.Context, tenantID api.TenantID, co
 				return
 			}
 
+			// Atomically check and allocate quota before creating.
+			if s.quotaManager != nil {
+				resources := tenant.ResourceRequest{
+					AgentCount: 1,
+					CPUCores:   int64(cfg.Resources.CPUCount) * 1000,
+					MemoryMB:   cfg.Resources.MemoryMB,
+					DiskMB:     cfg.Resources.DiskMB,
+				}
+				if err := s.quotaManager.CheckAndAllocate(ctx, cfg.TenantID, resources); err != nil {
+					result.Error = fmt.Sprintf("quota exceeded: %v", err)
+					results[index] = result
+					return
+				}
+				defer func() {
+					if !result.Success {
+						if rerr := s.quotaManager.ReleaseResources(ctx, cfg.TenantID, resources); rerr != nil {
+							s.logger.WarnContext(ctx, "failed to rollback bulk quota allocation",
+								"agent_id", cfg.ID, "error", rerr)
+						}
+					}
+				}()
+			}
+
 			// Create agent
 			if err := s.runtime.CreateAgent(ctx, cfg); err != nil {
 				result.Error = fmt.Sprintf("create failed: %v", err)
@@ -158,8 +194,12 @@ func (s *Server) bulkCreateAgents(ctx context.Context, tenantID api.TenantID, co
 				return
 			}
 
-			// Start agent
+			// Start agent — destroy on failure to avoid orphaned records
 			if err := s.runtime.StartAgent(ctx, cfg.ID); err != nil {
+				if derr := s.runtime.DestroyAgent(ctx, cfg.ID); derr != nil {
+					s.logger.WarnContext(ctx, "failed to destroy agent after bulk start failure",
+						"agent_id", cfg.ID, "error", derr)
+				}
 				result.Error = fmt.Sprintf("start failed: %v", err)
 				results[index] = result
 				return
@@ -175,6 +215,18 @@ func (s *Server) bulkCreateAgents(ctx context.Context, tenantID api.TenantID, co
 }
 
 // handleBulkDeleteAgents handles bulk agent deletion.
+//
+// @Summary      Bulk delete agents
+// @Description  Deletes multiple agents in a single request (concurrently). Partial success is possible.
+// @Tags         agents
+// @Accept       json
+// @Produce      json
+// @Param        request  body      BulkDeleteAgentsRequest  true  "Bulk delete request"
+// @Success      200  {object}  BulkDeleteAgentsResponse
+// @Failure      400  {object}  ProblemDetail
+// @Failure      401  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents/bulk/delete [post]
 func (s *Server) handleBulkDeleteAgents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -280,6 +332,24 @@ func (s *Server) bulkDeleteAgents(ctx context.Context, tenantID api.TenantID, ag
 				result.Error = fmt.Sprintf("delete failed: %v", err)
 				results[index] = result
 				return
+			}
+
+			// Release quota for the destroyed agent.
+			if s.quotaManager != nil {
+				resources := tenant.ResourceRequest{
+					AgentCount: 1,
+					CPUCores:   int64(info.Config.Resources.CPUCount) * 1000,
+					MemoryMB:   info.Config.Resources.MemoryMB,
+					DiskMB:     info.Config.Resources.DiskMB,
+				}
+				if rerr := s.quotaManager.ReleaseResources(ctx, info.Config.TenantID, resources); rerr != nil {
+					s.logger.WarnContext(ctx, "failed to release quota after bulk delete",
+						"agent_id", id, "error", rerr)
+				}
+			}
+
+			if s.scheduler != nil {
+				s.scheduler.UnscheduleAgent(ctx, id)
 			}
 
 			result.Success = true

@@ -2,18 +2,34 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/internal/observability"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/observability"
+	"github.com/dnakitare/aether/pkg/api"
 )
+
+// requestIDMiddleware injects a unique X-Request-ID into every request and
+// echoes it back in the response, enabling end-to-end correlation.
+func (s *Server) requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+		w.Header().Set("X-Request-ID", requestID)
+		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
 
 // loggingMiddleware logs HTTP requests and records metrics.
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
@@ -37,6 +53,8 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			tenantID = claims.TenantID
 		}
 
+		requestID, _ := r.Context().Value(requestIDKey{}).(string)
+
 		// Record metrics
 		s.metrics.RecordAPIRequest(
 			r.Method,
@@ -54,6 +72,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			"duration_ms", duration.Milliseconds(),
 			"remote_addr", r.RemoteAddr,
 			"tenant_id", tenantID,
+			"request_id", requestID,
 		)
 	})
 }
@@ -77,10 +96,14 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// corsMiddleware adds CORS headers.
+// corsMiddleware adds CORS headers based on the configured allowed origins.
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if s.isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -91,6 +114,19 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isAllowedOrigin reports whether origin is in the server's allowed origins list.
+func (s *Server) isAllowedOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range s.config.AllowedOrigins {
+		if allowed == "*" || allowed == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // authMiddleware validates JWT authentication on all endpoints except health/metrics.
@@ -150,22 +186,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// rateLimitMiddleware is a placeholder for rate limiting.
-// To enable rate limiting, inject the ratelimit.Middleware from internal/ratelimit
-// into the Server struct and use it here.
-//
-// Example:
-//
-//	import "github.com/aether-runtime/aether/internal/ratelimit"
-//	rateLimiter := ratelimit.NewMultiLayerLimiter(logger, tokenBucket)
-//	middleware := ratelimit.Middleware(logger, rateLimiter)
-func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Rate limiting is optional - if not configured, pass through
-		next.ServeHTTP(w, r)
-	})
-}
-
 // tracingMiddleware adds distributed tracing to HTTP requests.
 func (s *Server) tracingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +232,9 @@ func (s *Server) tracingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// requestIDKey is the context key for request IDs.
+type requestIDKey struct{}
+
 // responseWriter wraps http.ResponseWriter to capture status code.
 type responseWriter struct {
 	http.ResponseWriter
@@ -221,6 +244,22 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// requirePermission returns a handler that checks the caller has the given
+// permission before delegating to next. When auth is disabled (no claims in
+// context) the check is skipped so development mode still works.
+func (s *Server) requirePermission(perm auth.Permission, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := auth.GetClaims(r.Context())
+		if ok {
+			if err := auth.CheckPermission(claims, perm); err != nil {
+				s.respondError(w, http.StatusForbidden, "insufficient permissions")
+				return
+			}
+		}
+		next(w, r)
+	}
 }
 
 // Standard error responses

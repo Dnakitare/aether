@@ -14,14 +14,26 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/internal/observability"
-	"github.com/aether-runtime/aether/internal/scaler"
-	"github.com/aether-runtime/aether/internal/scheduler"
-	"github.com/aether-runtime/aether/internal/shutdown"
-	"github.com/aether-runtime/aether/internal/tenant"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/audit"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/observability"
+	"github.com/dnakitare/aether/internal/recovery"
+	"github.com/dnakitare/aether/internal/scaler"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/shutdown"
+	"github.com/dnakitare/aether/internal/tenant"
+	"github.com/dnakitare/aether/pkg/api"
 )
+
+// CheckpointRuntime is optionally implemented by the runtime to expose
+// checkpoint operations over the REST API.
+type CheckpointRuntime interface {
+	CreateCheckpoint(ctx context.Context, agentID api.AgentID) (*recovery.Checkpoint, error)
+	ListCheckpoints(ctx context.Context, agentID api.AgentID) ([]*recovery.Checkpoint, error)
+	GetLatestCheckpoint(ctx context.Context, agentID api.AgentID) (*recovery.Checkpoint, error)
+	RestoreFromCheckpoint(ctx context.Context, agentID api.AgentID, version int) error
+	DeleteCheckpoint(ctx context.Context, agentID api.AgentID, version int) error
+}
 
 // Server is the HTTP API server.
 type Server struct {
@@ -30,11 +42,15 @@ type Server struct {
 	server *http.Server
 
 	// Dependencies
-	runtime      api.Runtime
-	scheduler    *scheduler.Scheduler
-	scaler       *scaler.Scaler
-	quotaManager *tenant.QuotaManager
-	jwtManager   *auth.JWTManager
+	runtime           api.Runtime
+	checkpointRuntime CheckpointRuntime // non-nil when runtime supports checkpoints
+	scheduler         *scheduler.Scheduler
+	scaler            *scaler.Scaler
+	quotaManager      *tenant.QuotaManager
+	jwtManager        *auth.JWTManager
+	tokenIssuer       TokenIssuer // optional; enables POST /v1/auth/token
+	auditLogger       *audit.Logger
+	rateLimiter       func(http.Handler) http.Handler
 
 	// Configuration
 	config Config
@@ -45,6 +61,7 @@ type Server struct {
 	activeRequests atomic.Int64
 	accepting      atomic.Bool
 	wg             sync.WaitGroup
+	internalServer *http.Server
 
 	// Observability
 	metrics *observability.MetricsCollector
@@ -68,8 +85,17 @@ type Config struct {
 	// EnableAuth enables JWT authentication (should be true in production)
 	EnableAuth bool
 
+	// AllowedOrigins is the list of origins permitted for CORS requests.
+	// Use "*" to allow all origins. Empty list blocks all cross-origin requests.
+	AllowedOrigins []string
+
 	// TracingConfig for distributed tracing (optional)
 	TracingConfig *observability.TracerConfig
+
+	// MetricsAddress is the address for the internal metrics/health server
+	// (default ":9091"). Metrics are served here instead of the public API port
+	// so they are not accidentally exposed to external clients.
+	MetricsAddress string
 }
 
 // New creates a new HTTP API server.
@@ -90,6 +116,11 @@ func New(logger *slog.Logger, config Config, runtime api.Runtime, sched *schedul
 		quotaManager: qm,
 		jwtManager:   jwtMgr,
 		config:       config,
+	}
+
+	// Wire checkpoint support if the runtime implements it.
+	if cr, ok := runtime.(CheckpointRuntime); ok {
+		s.checkpointRuntime = cr
 	}
 
 	// Initialize health checker
@@ -120,16 +151,38 @@ func New(logger *slog.Logger, config Config, runtime api.Runtime, sched *schedul
 	s.setupRoutes()
 
 	s.server = &http.Server{
-		Addr:         config.Address,
-		Handler:      s.router,
-		ReadTimeout:  config.ReadTimeout,
-		WriteTimeout: config.WriteTimeout,
+		Addr:              config.Address,
+		Handler:           s.router,
+		ReadTimeout:       config.ReadTimeout,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      config.WriteTimeout,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	return s
 }
 
-// Start starts the HTTP server.
+// WithRateLimiter sets an optional rate limiting middleware. Call before Start().
+func (s *Server) WithRateLimiter(mw func(http.Handler) http.Handler) *Server {
+	s.rateLimiter = mw
+	s.router.Use(mw) // register immediately; gorilla/mux applies middleware at request time
+	return s
+}
+
+// WithAuditLogger attaches an audit logger. When set, all v1 API requests are
+// recorded in the audit_logs table. Call before Start().
+func (s *Server) WithAuditLogger(al *audit.Logger) *Server {
+	s.auditLogger = al
+	return s
+}
+
+// WithTokenIssuer sets the token issuer, enabling POST /v1/auth/token.
+func (s *Server) WithTokenIssuer(ti TokenIssuer) *Server {
+	s.tokenIssuer = ti
+	return s
+}
+
+// Start starts the HTTP server and the internal metrics server.
 func (s *Server) Start(ctx context.Context) error {
 	s.logger.InfoContext(ctx, "starting HTTP API server", "address", s.config.Address)
 
@@ -140,6 +193,28 @@ func (s *Server) Start(ctx context.Context) error {
 			errCh <- err
 		}
 	}()
+
+	// Start internal server for metrics and health (not exposed publicly).
+	metricsAddr := s.config.MetricsAddress
+	if metricsAddr == "" {
+		metricsAddr = ":9091"
+	}
+	internalMux := http.NewServeMux()
+	internalMux.Handle("/metrics", s.metrics.Handler())
+	internalMux.HandleFunc("/health", s.healthChecker.Health)
+	internalMux.HandleFunc("/readiness", s.healthChecker.Readiness)
+	s.internalServer = &http.Server{
+		Addr:              metricsAddr,
+		Handler:           internalMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() {
+		if err := s.internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.logger.ErrorContext(ctx, "internal metrics server error", "error", err)
+		}
+	}()
+	s.logger.InfoContext(ctx, "internal metrics server started", "address", metricsAddr)
 
 	select {
 	case err := <-errCh:
@@ -159,6 +234,12 @@ func (s *Server) Stop(ctx context.Context) error {
 		return fmt.Errorf("graceful shutdown failed: %w", err)
 	}
 
+	if s.internalServer != nil {
+		if err := s.internalServer.Shutdown(ctx); err != nil {
+			s.logger.WarnContext(ctx, "internal server shutdown error", "error", err)
+		}
+	}
+
 	s.logger.InfoContext(ctx, "HTTP API server stopped")
 	return nil
 }
@@ -172,9 +253,13 @@ func (s *Server) Router() http.Handler {
 func (s *Server) setupRoutes() {
 	// Global middleware (applied to all routes)
 	s.router.Use(s.requestTrackingMiddleware) // Must be first for graceful shutdown
+	s.router.Use(s.requestIDMiddleware)       // Inject X-Request-ID early for correlation
 	s.router.Use(s.tracingMiddleware)         // Add tracing context early
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.recoveryMiddleware)
+	if s.rateLimiter != nil {
+		s.router.Use(s.rateLimiter)
+	}
 	if s.config.EnableCORS {
 		s.router.Use(s.corsMiddleware)
 	}
@@ -183,8 +268,8 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/health", s.healthChecker.Health).Methods("GET")
 	s.router.HandleFunc("/readiness", s.healthChecker.Readiness).Methods("GET")
 
-	// Prometheus metrics (unauthenticated)
-	s.router.Handle("/metrics", s.metrics.Handler()).Methods("GET")
+	// Token issuance (unauthenticated — this IS the auth endpoint)
+	s.router.HandleFunc("/v1/auth/token", s.handleIssueToken).Methods("POST")
 
 	// API v1 (authenticated)
 	v1 := s.router.PathPrefix("/v1").Subrouter()
@@ -194,38 +279,52 @@ func (s *Server) setupRoutes() {
 		v1.Use(s.authMiddleware)
 	}
 
+	// Apply audit logging to all v1 routes if configured
+	if s.auditLogger != nil {
+		v1.Use(audit.Middleware(s.auditLogger))
+	}
+
 	// Agents
-	v1.HandleFunc("/agents", s.handleListAgents).Methods("GET")
-	v1.HandleFunc("/agents", s.handleCreateAgent).Methods("POST")
-	v1.HandleFunc("/agents/{id}", s.handleGetAgent).Methods("GET")
-	v1.HandleFunc("/agents/{id}", s.handleDeleteAgent).Methods("DELETE")
-	v1.HandleFunc("/agents/{id}/logs", s.handleGetAgentLogs).Methods("GET")
-	v1.HandleFunc("/agents/{id}/health", s.handleGetAgentHealth).Methods("GET")
+	v1.HandleFunc("/agents", s.requirePermission(auth.PermissionAgentRead, s.handleListAgents)).Methods("GET")
+	v1.HandleFunc("/agents", s.requirePermission(auth.PermissionAgentCreate, s.handleCreateAgent)).Methods("POST")
+	v1.HandleFunc("/agents/{id}", s.requirePermission(auth.PermissionAgentRead, s.handleGetAgent)).Methods("GET")
+	v1.HandleFunc("/agents/{id}", s.requirePermission(auth.PermissionAgentDelete, s.handleDeleteAgent)).Methods("DELETE")
+	v1.HandleFunc("/agents/{id}/logs", s.requirePermission(auth.PermissionAgentRead, s.handleGetAgentLogs)).Methods("GET")
+	v1.HandleFunc("/agents/{id}/health", s.requirePermission(auth.PermissionAgentRead, s.handleGetAgentHealth)).Methods("GET")
 
 	// Bulk operations
-	v1.HandleFunc("/agents/bulk/create", s.handleBulkCreateAgents).Methods("POST")
-	v1.HandleFunc("/agents/bulk/delete", s.handleBulkDeleteAgents).Methods("POST")
+	v1.HandleFunc("/agents/bulk/create", s.requirePermission(auth.PermissionAgentCreate, s.handleBulkCreateAgents)).Methods("POST")
+	v1.HandleFunc("/agents/bulk/delete", s.requirePermission(auth.PermissionAgentDelete, s.handleBulkDeleteAgents)).Methods("POST")
+
+	// Checkpoints (only registered when runtime supports them)
+	if s.checkpointRuntime != nil {
+		v1.HandleFunc("/agents/{id}/checkpoints", s.requirePermission(auth.PermissionAgentRead, s.handleListCheckpoints)).Methods("GET")
+		v1.HandleFunc("/agents/{id}/checkpoints", s.requirePermission(auth.PermissionAgentUpdate, s.handleCreateCheckpoint)).Methods("POST")
+		v1.HandleFunc("/agents/{id}/checkpoints/latest", s.requirePermission(auth.PermissionAgentRead, s.handleGetLatestCheckpoint)).Methods("GET")
+		v1.HandleFunc("/agents/{id}/checkpoints/{version}/restore", s.requirePermission(auth.PermissionAgentUpdate, s.handleRestoreCheckpoint)).Methods("POST")
+		v1.HandleFunc("/agents/{id}/checkpoints/{version}", s.requirePermission(auth.PermissionAgentDelete, s.handleDeleteCheckpoint)).Methods("DELETE")
+	}
 
 	// Quotas
-	v1.HandleFunc("/quotas", s.handleListQuotas).Methods("GET")
-	v1.HandleFunc("/quotas/{tenant_id}", s.handleGetQuota).Methods("GET")
-	v1.HandleFunc("/quotas/{tenant_id}", s.handleSetQuota).Methods("PUT")
-	v1.HandleFunc("/quotas/{tenant_id}/usage", s.handleGetUsage).Methods("GET")
+	v1.HandleFunc("/quotas", s.requirePermission(auth.PermissionQuotaRead, s.handleListQuotas)).Methods("GET")
+	v1.HandleFunc("/quotas/{tenant_id}", s.requirePermission(auth.PermissionQuotaRead, s.handleGetQuota)).Methods("GET")
+	v1.HandleFunc("/quotas/{tenant_id}", s.requirePermission(auth.PermissionQuotaWrite, s.handleSetQuota)).Methods("PUT")
+	v1.HandleFunc("/quotas/{tenant_id}/usage", s.requirePermission(auth.PermissionQuotaRead, s.handleGetUsage)).Methods("GET")
 
 	// Scheduler
-	v1.HandleFunc("/scheduler/stats", s.handleGetSchedulerStats).Methods("GET")
-	v1.HandleFunc("/scheduler/nodes", s.handleListNodes).Methods("GET")
+	v1.HandleFunc("/scheduler/stats", s.requirePermission(auth.PermissionSchedulerRead, s.handleGetSchedulerStats)).Methods("GET")
+	v1.HandleFunc("/scheduler/nodes", s.requirePermission(auth.PermissionSchedulerRead, s.handleListNodes)).Methods("GET")
 
 	// Scaler
-	v1.HandleFunc("/scaler/policies", s.handleListPolicies).Methods("GET")
-	v1.HandleFunc("/scaler/policies", s.handleCreatePolicy).Methods("POST")
-	v1.HandleFunc("/scaler/policies/{name}", s.handleGetPolicy).Methods("GET")
-	v1.HandleFunc("/scaler/policies/{name}", s.handleDeletePolicy).Methods("DELETE")
+	v1.HandleFunc("/scaler/policies", s.requirePermission(auth.PermissionScalerRead, s.handleListPolicies)).Methods("GET")
+	v1.HandleFunc("/scaler/policies", s.requirePermission(auth.PermissionScalerWrite, s.handleCreatePolicy)).Methods("POST")
+	v1.HandleFunc("/scaler/policies/{name}", s.requirePermission(auth.PermissionScalerRead, s.handleGetPolicy)).Methods("GET")
+	v1.HandleFunc("/scaler/policies/{name}", s.requirePermission(auth.PermissionScalerWrite, s.handleDeletePolicy)).Methods("DELETE")
 }
 
 // respondJSON sends a JSON response.
 func (s *Server) respondJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 
 	if data != nil {

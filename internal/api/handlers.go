@@ -6,18 +6,33 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/internal/scaler"
-	"github.com/aether-runtime/aether/internal/tenant"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/scaler"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/tenant"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // Agent handlers
 
+// handleListAgents lists agents for the authenticated tenant.
+//
+// @Summary      List agents
+// @Description  Returns a paginated list of agents for the authenticated tenant
+// @Tags         agents
+// @Produce      json
+// @Param        page      query   int  false  "Page number (default 1)"
+// @Param        page_size query   int  false  "Items per page (default 20, max 100)"
+// @Success      200  {object}  PaginatedResponse
+// @Failure      401  {object}  ProblemDetail
+// @Failure      500  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents [get]
 func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -31,21 +46,11 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	// Parse pagination parameters
 	pagination := parsePaginationParams(r)
 
-	// List all agents and filter by tenant
-	// NOTE: For large deployments, consider adding tenant filtering to runtime.ListAgents
-	// to avoid loading all agents into memory. Current approach is sufficient for <10k agents.
-	allAgents, err := s.runtime.ListAgents(ctx, nil)
+	// List agents filtered by tenant at the source to avoid loading all tenants' data.
+	agents, err := s.runtime.ListAgents(ctx, &tenantID)
 	if err != nil {
 		s.respondInternalError(w, fmt.Sprintf("Failed to list agents: %v", err))
 		return
-	}
-
-	// Filter by tenant to enforce isolation
-	var agents []*api.AgentInfo
-	for _, agent := range allAgents {
-		if agent.Config.TenantID == tenantID {
-			agents = append(agents, agent)
-		}
 	}
 
 	// Apply pagination
@@ -68,6 +73,22 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	s.respondPaginated(w, paginatedAgents, pagination, totalItems)
 }
 
+// handleCreateAgent creates a new agent.
+//
+// @Summary      Create agent
+// @Description  Creates and starts a new isolated agent for the authenticated tenant
+// @Tags         agents
+// @Accept       json
+// @Produce      json
+// @Param        agent  body      api.AgentConfig  true  "Agent configuration"
+// @Success      201    {object}  api.AgentInfo
+// @Failure      400    {object}  ProblemDetail
+// @Failure      401    {object}  ProblemDetail
+// @Failure      403    {object}  ProblemDetail
+// @Failure      429    {object}  ProblemDetail  "Quota exceeded"
+// @Failure      500    {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents [post]
 func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -113,7 +134,10 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	// Set tenant ID from auth context
 	req.TenantID = tenantID
 
-	// Check quota
+	// Atomically check quota and allocate in one lock to prevent TOCTOU races
+	// under concurrent agent creation for the same tenant.
+	var allocatedResources *tenant.ResourceRequest
+
 	if s.quotaManager != nil {
 		resources := tenant.ResourceRequest{
 			AgentCount: 1,
@@ -122,8 +146,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			DiskMB:     req.Resources.DiskMB,
 		}
 
-		if err := s.quotaManager.CheckQuota(ctx, req.TenantID, resources); err != nil {
-			// Check if it's a quota exceeded error
+		if err := s.quotaManager.CheckAndAllocate(ctx, req.TenantID, resources); err != nil {
 			if quotaErr, ok := err.(*tenant.QuotaExceededError); ok {
 				s.respondQuotaExceeded(w, quotaErr.Resource, quotaErr.Requested, quotaErr.Limit)
 			} else {
@@ -131,24 +154,42 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		allocatedResources = &resources
+	}
 
-		// Allocate resources
-		if err := s.quotaManager.AllocateResources(ctx, req.TenantID, resources); err != nil {
-			s.respondInternalError(w, fmt.Sprintf("Failed to allocate resources: %v", err))
-			return
+	// releaseQuota rolls back the allocation; safe to call multiple times (no-op if nil).
+	releaseQuota := func() {
+		if allocatedResources != nil {
+			if rerr := s.quotaManager.ReleaseResources(ctx, req.TenantID, *allocatedResources); rerr != nil {
+				s.logger.WarnContext(ctx, "failed to rollback quota allocation", "error", rerr)
+			}
+			allocatedResources = nil
 		}
 	}
 
 	// Create agent
 	if err := s.runtime.CreateAgent(ctx, req); err != nil {
+		releaseQuota()
 		s.respondInternalError(w, fmt.Sprintf("Failed to create agent: %v", err))
 		return
 	}
 
 	// Start agent
 	if err := s.runtime.StartAgent(ctx, req.ID); err != nil {
+		// Destroy the agent we just created since start failed.
+		if derr := s.runtime.DestroyAgent(ctx, req.ID); derr != nil {
+			s.logger.WarnContext(ctx, "failed to destroy agent after start failure",
+				"agent_id", req.ID, "error", derr)
+		}
+		releaseQuota()
 		s.respondInternalError(w, fmt.Sprintf("Failed to start agent: %v", err))
 		return
+	}
+
+	// Record the allocation on the scheduler so its node resource accounting
+	// stays accurate even though we bypassed the async queue.
+	if s.scheduler != nil {
+		s.scheduler.RecordAllocation(ctx, req.ID, req.TenantID, scheduler.FromAgentConfig(req))
 	}
 
 	// Get agent info
@@ -161,6 +202,19 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusCreated, info)
 }
 
+// handleGetAgent retrieves a specific agent by ID.
+//
+// @Summary      Get agent
+// @Description  Returns details for a specific agent
+// @Tags         agents
+// @Produce      json
+// @Param        id   path      string  true  "Agent ID"
+// @Success      200  {object}  api.AgentInfo
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      404  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents/{id} [get]
 func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
@@ -194,6 +248,19 @@ func (s *Server) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, info)
 }
 
+// handleDeleteAgent stops and destroys an agent.
+//
+// @Summary      Delete agent
+// @Description  Stops and destroys an agent
+// @Tags         agents
+// @Produce      json
+// @Param        id   path  string  true  "Agent ID"
+// @Success      204
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      404  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents/{id} [delete]
 func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
@@ -231,7 +298,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Release resources
+	// Release quota and scheduler allocations.
 	if s.quotaManager != nil {
 		resources := tenant.ResourceRequest{
 			AgentCount: 1,
@@ -241,13 +308,31 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := s.quotaManager.ReleaseResources(ctx, info.Config.TenantID, resources); err != nil {
-			s.logger.WarnContext(ctx, "failed to release resources", "error", err)
+			s.logger.WarnContext(ctx, "failed to release quota resources", "error", err)
 		}
+	}
+
+	if s.scheduler != nil {
+		s.scheduler.UnscheduleAgent(ctx, agentID)
 	}
 
 	s.respondJSON(w, http.StatusNoContent, nil)
 }
 
+// handleGetAgentLogs returns logs for an agent.
+//
+// @Summary      Get agent logs
+// @Description  Returns logs for an agent. Use ?follow=true for streaming via Server-Sent Events.
+// @Tags         agents
+// @Produce      plain
+// @Param        id      path   string  true   "Agent ID"
+// @Param        follow  query  bool    false  "Stream logs"
+// @Success      200  {string}  string  "Log output"
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      404  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents/{id}/logs [get]
 func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
@@ -296,7 +381,9 @@ func (s *Server) handleGetAgentLogs(w http.ResponseWriter, r *http.Request) {
 		// Standard response for non-streaming or static logs
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		// io.Copy happens in runtime.GetAgentLogs
+		if _, err := io.Copy(w, reader); err != nil && r.Context().Err() == nil {
+			s.logger.WarnContext(r.Context(), "error copying log stream", "error", err)
+		}
 	}
 }
 
@@ -315,11 +402,15 @@ func (s *Server) streamLogsSSE(w http.ResponseWriter, r *http.Request, reader io
 
 	// Stream logs line by line
 	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MB max line
 	for scanner.Scan() {
 		line := scanner.Text()
 
+		// SSE spec: multi-line data must use "data: " prefix on each line
+		escaped := strings.ReplaceAll(line, "\n", "\ndata: ")
+
 		// Send as SSE event
-		fmt.Fprintf(w, "data: %s\n\n", line)
+		fmt.Fprintf(w, "data: %s\n\n", escaped)
 
 		// Flush after each line
 		if flusher, ok := w.(http.Flusher); ok {
@@ -333,8 +424,24 @@ func (s *Server) streamLogsSSE(w http.ResponseWriter, r *http.Request, reader io
 		default:
 		}
 	}
+	if err := scanner.Err(); err != nil && r.Context().Err() == nil {
+		s.logger.WarnContext(r.Context(), "log scanner error", "error", err)
+	}
 }
 
+// handleGetAgentHealth returns the health status for an agent.
+//
+// @Summary      Get agent health
+// @Description  Returns health status for an agent
+// @Tags         agents
+// @Produce      json
+// @Param        id   path      string  true  "Agent ID"
+// @Success      200  {object}  api.HealthStatus
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      404  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /agents/{id}/health [get]
 func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
@@ -376,6 +483,18 @@ func (s *Server) handleGetAgentHealth(w http.ResponseWriter, r *http.Request) {
 
 // Quota handlers
 
+// handleListQuotas lists all tenant quotas (admin only).
+//
+// @Summary      List quotas
+// @Description  Returns all tenant quotas. Requires admin role.
+// @Tags         quotas
+// @Produce      json
+// @Success      200  {array}   tenant.Quota
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /quotas [get]
 func (s *Server) handleListQuotas(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -401,6 +520,20 @@ func (s *Server) handleListQuotas(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, quotas)
 }
 
+// handleGetQuota returns the quota for a specific tenant.
+//
+// @Summary      Get quota
+// @Description  Returns the resource quota for a tenant. Tenants can only view their own quota unless admin.
+// @Tags         quotas
+// @Produce      json
+// @Param        tenant_id  path      string  true  "Tenant ID"
+// @Success      200  {object}  tenant.Quota
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      404  {object}  ProblemDetail
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /quotas/{tenant_id} [get]
 func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -445,6 +578,22 @@ func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, quota)
 }
 
+// handleSetQuota sets the resource quota for a tenant (admin only).
+//
+// @Summary      Set quota
+// @Description  Sets the resource quota for a tenant. Requires admin role.
+// @Tags         quotas
+// @Accept       json
+// @Produce      json
+// @Param        tenant_id  path      string        true  "Tenant ID"
+// @Param        quota      body      tenant.Quota  true  "Quota configuration"
+// @Success      200  {object}  tenant.Quota
+// @Failure      400  {object}  ProblemDetail
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /quotas/{tenant_id} [put]
 func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -478,7 +627,7 @@ func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 
 	quota.TenantID = tenantID
 
-	if err := s.quotaManager.SetQuota(&quota); err != nil {
+	if err := s.quotaManager.SetQuota(ctx, &quota); err != nil {
 		s.respondValidationError(w, "Invalid quota configuration", []FieldError{
 			{Field: "quota", Message: err.Error(), Code: "INVALID_QUOTA"},
 		})
@@ -488,6 +637,20 @@ func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, &quota)
 }
 
+// handleGetUsage returns current resource usage for a tenant.
+//
+// @Summary      Get usage
+// @Description  Returns current resource usage for a tenant. Tenants can only view their own usage unless admin.
+// @Tags         quotas
+// @Produce      json
+// @Param        tenant_id  path      string  true  "Tenant ID"
+// @Success      200  {object}  tenant.ResourceUsage
+// @Failure      401  {object}  ProblemDetail
+// @Failure      403  {object}  ProblemDetail
+// @Failure      404  {object}  ProblemDetail
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /quotas/{tenant_id}/usage [get]
 func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -534,6 +697,16 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 
 // Scheduler handlers
 
+// handleGetSchedulerStats returns scheduler statistics.
+//
+// @Summary      Get scheduler stats
+// @Description  Returns current statistics from the agent scheduler
+// @Tags         scheduler
+// @Produce      json
+// @Success      200  {object}  scheduler.Stats
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /scheduler/stats [get]
 func (s *Server) handleGetSchedulerStats(w http.ResponseWriter, r *http.Request) {
 	if s.scheduler == nil {
 		s.respondServiceUnavailable(w, "Scheduler")
@@ -544,6 +717,16 @@ func (s *Server) handleGetSchedulerStats(w http.ResponseWriter, r *http.Request)
 	s.respondJSON(w, http.StatusOK, stats)
 }
 
+// handleListNodes lists all scheduler nodes.
+//
+// @Summary      List nodes
+// @Description  Returns all nodes registered with the scheduler
+// @Tags         scheduler
+// @Produce      json
+// @Success      200  {array}   scheduler.Node
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /scheduler/nodes [get]
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	if s.scheduler == nil {
 		s.respondServiceUnavailable(w, "Scheduler")
@@ -556,6 +739,16 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 // Scaler handlers
 
+// handleListPolicies lists all scaling policies.
+//
+// @Summary      List scaling policies
+// @Description  Returns all configured auto-scaling policies
+// @Tags         scaler
+// @Produce      json
+// @Success      200  {array}   scaler.Policy
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /scaler/policies [get]
 func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
 		s.respondServiceUnavailable(w, "Scaler")
@@ -566,6 +759,19 @@ func (s *Server) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, policies)
 }
 
+// handleCreatePolicy creates a new scaling policy.
+//
+// @Summary      Create scaling policy
+// @Description  Creates a new auto-scaling policy
+// @Tags         scaler
+// @Accept       json
+// @Produce      json
+// @Param        policy  body      scaler.Policy  true  "Scaling policy configuration"
+// @Success      201  {object}  scaler.Policy
+// @Failure      400  {object}  ProblemDetail
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /scaler/policies [post]
 func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
 		s.respondServiceUnavailable(w, "Scaler")
@@ -590,6 +796,18 @@ func (s *Server) handleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusCreated, &policy)
 }
 
+// handleGetPolicy retrieves a specific scaling policy by name.
+//
+// @Summary      Get scaling policy
+// @Description  Returns a specific auto-scaling policy by name
+// @Tags         scaler
+// @Produce      json
+// @Param        name  path      string  true  "Policy name"
+// @Success      200  {object}  scaler.Policy
+// @Failure      404  {object}  ProblemDetail
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /scaler/policies/{name} [get]
 func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
 		s.respondServiceUnavailable(w, "Scaler")
@@ -608,6 +826,17 @@ func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, policy)
 }
 
+// handleDeletePolicy removes a scaling policy by name.
+//
+// @Summary      Delete scaling policy
+// @Description  Removes an auto-scaling policy by name
+// @Tags         scaler
+// @Produce      json
+// @Param        name  path  string  true  "Policy name"
+// @Success      204
+// @Failure      503  {object}  ProblemDetail
+// @Security     BearerAuth
+// @Router       /scaler/policies/{name} [delete]
 func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 	if s.scaler == nil {
 		s.respondServiceUnavailable(w, "Scaler")
@@ -623,5 +852,5 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 
 // generateID generates a unique ID with a prefix.
 func generateID(prefix string) string {
-	return prefix + "-" + time.Now().Format("20060102150405")
+	return prefix + "-" + uuid.New().String()
 }
