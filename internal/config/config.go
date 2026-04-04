@@ -40,11 +40,12 @@ type Config struct {
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Address      string        `mapstructure:"address"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
-	EnableCORS   bool          `mapstructure:"enable_cors"`
-	EnableAuth   bool          `mapstructure:"enable_auth"`
+	Address        string        `mapstructure:"address"`
+	ReadTimeout    time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout   time.Duration `mapstructure:"write_timeout"`
+	EnableCORS     bool          `mapstructure:"enable_cors"`
+	EnableAuth     bool          `mapstructure:"enable_auth"`
+	AllowedOrigins []string      `mapstructure:"allowed_origins"`
 }
 
 // SchedulerConfig holds scheduler configuration.
@@ -77,6 +78,7 @@ type DatabaseConfig struct {
 	MaxOpenConns    int           `mapstructure:"max_open_conns"`
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
+	MigrationsPath  string        `mapstructure:"migrations_path"`
 }
 
 // RedisConfig holds Redis configuration.
@@ -129,6 +131,11 @@ type SecurityConfig struct {
 	VaultEnabled     bool          `mapstructure:"vault_enabled"`
 	VaultAddress     string        `mapstructure:"vault_address"`
 	VaultToken       string        `mapstructure:"vault_token"`
+
+	// Asymmetric JWT signing (RS256). When both paths are set, RS256 is used
+	// instead of the symmetric HS256 secret above.
+	JWTPrivateKeyPath string `mapstructure:"jwt_private_key_path"`
+	JWTPublicKeyPath  string `mapstructure:"jwt_public_key_path"`
 }
 
 // Load loads configuration from file and environment variables.
@@ -190,6 +197,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.write_timeout", 15*time.Second)
 	v.SetDefault("server.enable_cors", false)
 	v.SetDefault("server.enable_auth", true)
+	v.SetDefault("server.allowed_origins", []string{})
 
 	// Scheduler defaults
 	v.SetDefault("scheduler.mode", "local")
@@ -209,6 +217,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_open_conns", 25)
 	v.SetDefault("database.max_idle_conns", 5)
 	v.SetDefault("database.conn_max_lifetime", 5*time.Minute)
+	v.SetDefault("database.migrations_path", "migrations")
 
 	// Redis defaults
 	v.SetDefault("redis.address", "localhost:6379")
