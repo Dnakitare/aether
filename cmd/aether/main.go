@@ -10,12 +10,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/cli"
-	"github.com/aether-runtime/aether/internal/observability"
-	"github.com/aether-runtime/aether/internal/runtime"
-	"github.com/aether-runtime/aether/internal/runtime/vm"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/cli"
+	"github.com/dnakitare/aether/internal/observability"
+	"github.com/dnakitare/aether/internal/runtime"
+	"github.com/dnakitare/aether/internal/runtime/vm"
+	"github.com/dnakitare/aether/pkg/api"
 	"github.com/spf13/cobra"
+)
+
+// Build-time variables injected via -ldflags.
+var (
+	Version   = "dev"
+	CommitSHA = "unknown"
+	BuildDate = "unknown"
 )
 
 var (
@@ -28,6 +35,24 @@ var (
 	logger *slog.Logger
 )
 
+// @title           Aether Runtime API
+// @version         0.2.0
+// @description     Agent runtime orchestration platform — create, schedule, and manage isolated AI agents on Firecracker microVMs.
+// @termsOfService  https://aether.io/terms
+//
+// @contact.name   Aether Support
+// @contact.url    https://aether.io/support
+//
+// @license.name  Apache 2.0
+// @license.url   http://www.apache.org/licenses/LICENSE-2.0.html
+//
+// @host      localhost:8080
+// @BasePath  /v1
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -58,7 +83,7 @@ orchestration, and observability at scale.`,
 		logger, _, err = observability.Setup(ctx, observability.Config{
 			LogLevel:       level,
 			ServiceName:    "aether",
-			ServiceVersion: "0.1.0",
+			ServiceVersion: Version,
 			Environment:    "development",
 			EnableTracing:  false,
 		})
@@ -71,6 +96,14 @@ orchestration, and observability at scale.`,
 	},
 }
 
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print version information",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("aether %s (commit: %s, built: %s)\n", Version, CommitSHA, BuildDate)
+	},
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "Config file path")
@@ -78,6 +111,7 @@ func init() {
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 var completionCmd = &cobra.Command{
