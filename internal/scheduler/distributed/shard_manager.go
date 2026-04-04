@@ -171,6 +171,17 @@ func (sm *ShardManager) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Health checks connectivity to the etcd cluster.
+func (sm *ShardManager) Health(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err := sm.client.Get(ctx, "health-probe")
+	if err != nil {
+		return fmt.Errorf("etcd health check failed: %w", err)
+	}
+	return nil
+}
+
 // GetScheduler returns the scheduler responsible for the given key.
 func (sm *ShardManager) GetScheduler(key string) string {
 	sm.mu.RLock()

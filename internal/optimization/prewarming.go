@@ -8,10 +8,18 @@ import (
 	"time"
 )
 
+// VMFactory creates a new VM for a given workload type.
+// The runtime injects its VM manager via this interface so the pool can
+// create real Firecracker instances instead of stubs.
+type VMFactory interface {
+	CreatePrewarmedVM(ctx context.Context, workloadType WorkloadType) (interface{}, error)
+}
+
 // PrewarmingPool manages a pool of pre-warmed VMs for fast startup
 type PrewarmingPool struct {
-	logger *slog.Logger
-	config PrewarmingConfig
+	logger  *slog.Logger
+	config  PrewarmingConfig
+	factory VMFactory // optional; nil falls back to stub VMs
 
 	// Pool management
 	mu          sync.RWMutex
@@ -43,7 +51,7 @@ type PrewarmingConfig struct {
 // DefaultPrewarmingConfig returns default pre-warming configuration
 func DefaultPrewarmingConfig() PrewarmingConfig {
 	return PrewarmingConfig{
-		Enabled: true,
+		Enabled: false,
 		PoolSize: map[WorkloadType]int{
 			WorkloadCodeExecution:  5,
 			WorkloadLLMAgent:       3,
@@ -90,6 +98,8 @@ type PrewarmedVM struct {
 	LastUsed     time.Time
 	Healthy      bool
 	InUse        bool
+	// VM holds the underlying VM object created by the factory (nil for stub VMs).
+	VM interface{}
 }
 
 // PoolMetrics tracks metrics for a VM pool
@@ -103,6 +113,12 @@ type PoolMetrics struct {
 	InUseSize     int
 	HitRate       float64
 	AvgWaitTime   time.Duration
+}
+
+// SetFactory injects a VMFactory so the pool creates real VMs instead of stubs.
+// Must be called before Start.
+func (pp *PrewarmingPool) SetFactory(f VMFactory) {
+	pp.factory = f
 }
 
 // NewPrewarmingPool creates a new pre-warming pool
@@ -129,6 +145,12 @@ func NewPrewarmingPool(logger *slog.Logger, config PrewarmingConfig) *Prewarming
 
 // Start starts the pre-warming pool
 func (pp *PrewarmingPool) Start(ctx context.Context) error {
+	if pp.factory == nil && pp.config.Enabled {
+		pp.logger.Warn("prewarming pool enabled but no VMFactory set — disabling to prevent stub VM creation",
+			"action", "pool_disabled")
+		pp.config.Enabled = false
+	}
+
 	if !pp.config.Enabled {
 		pp.logger.Info("pre-warming disabled, skipping pool startup")
 		return nil
@@ -300,26 +322,30 @@ func (pp *PrewarmingPool) createVM(ctx context.Context, workloadType WorkloadTyp
 		}
 
 		pool := pp.getPool(workloadType)
-		pool.mu.Lock()
-		defer pool.mu.Unlock()
 
+		// Capture metrics values while holding pool.mu, then release before
+		// calling updateMetrics (which acquires pp.mu). This preserves the
+		// consistent lock order: pool.mu is never held while acquiring pp.mu.
+		pool.mu.Lock()
 		pool.available = append(pool.available, vm)
+		availableSize := len(pool.available)
+		pool.mu.Unlock()
 
 		pp.updateMetrics(workloadType, func(m *PoolMetrics) {
 			m.TotalCreated++
 			m.CurrentSize++
-			m.AvailableSize = len(pool.available)
+			m.AvailableSize = availableSize
 		})
 	}()
 
 	return nil
 }
 
-// createVMSync creates a new pre-warmed VM synchronously
+// createVMSync creates a new pre-warmed VM synchronously.
+// When a VMFactory has been injected it creates a real VM; otherwise it falls
+// back to a lightweight stub so the pool can still track warm-up slots.
 func (pp *PrewarmingPool) createVMSync(ctx context.Context, workloadType WorkloadType) (*PrewarmedVM, error) {
 	start := time.Now()
-
-	// Generate VM ID
 	vmID := fmt.Sprintf("prewarmed-%s-%d", workloadType, time.Now().UnixNano())
 
 	pp.logger.Info("creating pre-warmed VM",
@@ -327,26 +353,36 @@ func (pp *PrewarmingPool) createVMSync(ctx context.Context, workloadType Workloa
 		"workload_type", workloadType,
 	)
 
-	// Simulate VM creation and warmup
-	// In production: create actual Firecracker microVM
-	time.Sleep(pp.config.WarmupTime)
+	var vmObj interface{}
+	if pp.factory != nil {
+		var err error
+		vmObj, err = pp.factory.CreatePrewarmedVM(ctx, workloadType)
+		if err != nil {
+			return nil, fmt.Errorf("factory failed to create VM for %s: %w", workloadType, err)
+		}
+	} else {
+		// Stub: simulate warmup latency only (no real VM).
+		time.Sleep(pp.config.WarmupTime)
+	}
 
-	vm := &PrewarmedVM{
+	pvm := &PrewarmedVM{
 		ID:           vmID,
 		WorkloadType: workloadType,
 		CreatedAt:    time.Now(),
 		LastUsed:     time.Now(),
 		Healthy:      true,
 		InUse:        false,
+		VM:           vmObj,
 	}
 
 	pp.logger.Info("created pre-warmed VM",
 		"vm_id", vmID,
 		"workload_type", workloadType,
+		"real_vm", vmObj != nil,
 		"duration", time.Since(start),
 	)
 
-	return vm, nil
+	return pvm, nil
 }
 
 // maintainPools maintains pool sizes
@@ -525,6 +561,33 @@ func (pp *PrewarmingPool) checkVMHealth() {
 				"count", unhealthy,
 			)
 		}
+	}
+}
+
+// DiscardVM removes a VM from the in-use set without returning it to the
+// available pool. Use this when the underlying VM has been destroyed and
+// cannot be reused (e.g. after agent destroy). The pool's maintenance loop
+// will create a replacement to keep the pool at target size.
+func (pp *PrewarmingPool) DiscardVM(vmID string) {
+	pp.mu.RLock()
+	defer pp.mu.RUnlock()
+
+	for workloadType, pool := range pp.pools {
+		pool.mu.Lock()
+		if _, exists := pool.inUse[vmID]; exists {
+			delete(pool.inUse, vmID)
+			inUseSize := len(pool.inUse)
+			pool.mu.Unlock()
+
+			pp.updateMetrics(workloadType, func(m *PoolMetrics) {
+				m.InUseSize = inUseSize
+				if m.CurrentSize > 0 {
+					m.CurrentSize--
+				}
+			})
+			return
+		}
+		pool.mu.Unlock()
 	}
 }
 

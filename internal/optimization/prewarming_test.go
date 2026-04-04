@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/optimization"
+	"github.com/dnakitare/aether/internal/optimization"
 )
 
 func TestPrewarmingConfig(t *testing.T) {
 	config := optimization.DefaultPrewarmingConfig()
 
-	if !config.Enabled {
-		t.Error("Expected prewarming to be enabled by default")
+	if config.Enabled {
+		t.Error("Expected prewarming to be disabled by default (requires VMFactory to activate)")
 	}
 
 	if len(config.PoolSize) == 0 {
@@ -34,12 +34,20 @@ func TestPrewarmingConfig(t *testing.T) {
 	}
 }
 
+// stubFactory is a minimal VMFactory for tests that returns a placeholder object.
+type stubFactory struct{}
+
+func (f *stubFactory) CreatePrewarmedVM(ctx context.Context, wt optimization.WorkloadType) (interface{}, error) {
+	return struct{ id string }{id: "stub-vm"}, nil
+}
+
 func TestPrewarmingPool(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelError,
 	}))
 
 	config := optimization.DefaultPrewarmingConfig()
+	config.Enabled = true // explicitly enable; pool requires a factory when enabled
 	// Speed up tests
 	config.PoolSize = map[optimization.WorkloadType]int{
 		optimization.WorkloadCodeExecution: 2,
@@ -47,6 +55,7 @@ func TestPrewarmingPool(t *testing.T) {
 	config.WarmupTime = 100 * time.Millisecond
 
 	pool := optimization.NewPrewarmingPool(logger, config)
+	pool.SetFactory(&stubFactory{}) // required — pool disables itself without a factory
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

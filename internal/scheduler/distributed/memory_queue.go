@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/scheduler"
 	"github.com/google/uuid"
 )
 
@@ -312,6 +312,11 @@ func (mq *MemoryQueue) Stats(ctx context.Context) (*QueueStats, error) {
 		Lag:           int64(len(mq.queue)),
 		Messages:      mq.stats.enqueued,
 	}, nil
+}
+
+// Health always returns nil for the in-memory queue (no external dependencies).
+func (mq *MemoryQueue) Health(_ context.Context) error {
+	return nil
 }
 
 // GetDLQ returns the current dead letter queue contents (for testing/debugging).

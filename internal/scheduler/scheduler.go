@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // MetricsRecorder defines the interface for recording scheduler metrics.
@@ -42,7 +42,8 @@ type Scheduler struct {
 	events chan ScheduleEvent
 
 	// Stop channel
-	stopCh chan struct{}
+	stopCh   chan struct{}
+	stopOnce sync.Once
 
 	// Scheduling interval
 	interval time.Duration
@@ -116,9 +117,9 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}
 }
 
-// Stop stops the scheduler.
+// Stop stops the scheduler. Safe to call more than once.
 func (s *Scheduler) Stop() {
-	close(s.stopCh)
+	s.stopOnce.Do(func() { close(s.stopCh) })
 }
 
 // Events returns the event channel for monitoring scheduling results.
@@ -149,6 +150,42 @@ func (s *Scheduler) ScheduleAgent(ctx context.Context, req *AgentRequest) error 
 	s.queue.Enqueue(req)
 	span.SetAttributes(attribute.Int("queue.length", s.queue.Len()))
 	return nil
+}
+
+// LocalNodeID is the well-known ID for the single local compute node used in
+// non-distributed deployments.
+const LocalNodeID = "local"
+
+// RecordAllocation directly marks an agent as allocated on a specific node,
+// bypassing the async queue. Use this after synchronously creating an agent
+// so the scheduler's resource accounting stays accurate.
+func (s *Scheduler) RecordAllocation(ctx context.Context, agentID api.AgentID, tenantID api.TenantID, resources Resources) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, node := range s.nodes {
+		if node.HasAgent(agentID) {
+			return // already recorded
+		}
+	}
+
+	// Prefer the local node; fall back to any registered node.
+	node, ok := s.nodes[LocalNodeID]
+	if !ok {
+		for _, n := range s.nodes {
+			node = n
+			break
+		}
+	}
+	if node == nil {
+		s.logger.WarnContext(ctx, "no nodes registered; cannot record allocation",
+			"agent_id", agentID)
+		return
+	}
+
+	node.Allocate(agentID, tenantID, resources)
+	s.logger.DebugContext(ctx, "recorded allocation on node",
+		"agent_id", agentID, "node_id", node.ID)
 }
 
 // UnscheduleAgent removes an agent from the scheduling queue or node.

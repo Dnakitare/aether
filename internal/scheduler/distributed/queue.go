@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/scheduler"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/pkg/api"
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
@@ -32,6 +32,9 @@ type Queue interface {
 
 	// Stats returns queue statistics
 	Stats(ctx context.Context) (*QueueStats, error)
+
+	// Health checks whether the queue backend is reachable.
+	Health(ctx context.Context) error
 }
 
 // SchedulingRequest represents a request to schedule an agent.
@@ -501,6 +504,24 @@ func (dq *DistributedQueue) Stats(ctx context.Context) (*QueueStats, error) {
 		Lag:           stats.Lag,
 		Messages:      stats.Messages,
 	}, nil
+}
+
+// Health dials the first configured Kafka broker to verify connectivity.
+func (dq *DistributedQueue) Health(ctx context.Context) error {
+	if len(dq.config.Brokers) == 0 {
+		return fmt.Errorf("no kafka brokers configured")
+	}
+	deadline, ok := ctx.Deadline()
+	timeout := 2 * time.Second
+	if ok {
+		timeout = time.Until(deadline)
+	}
+	conn, err := net.DialTimeout("tcp", dq.config.Brokers[0], timeout)
+	if err != nil {
+		return fmt.Errorf("kafka broker unreachable: %w", err)
+	}
+	conn.Close()
+	return nil
 }
 
 // QueueStats contains queue statistics.

@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/scheduler"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/pkg/api"
 	"github.com/redis/go-redis/v9"
 )
 
