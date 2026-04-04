@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/scheduler"
 )
 
 // TestSimpleIntegration_BasicWorkflow tests basic integration without complex dependencies

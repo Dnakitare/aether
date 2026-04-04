@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/internal/ha"
+	"github.com/dnakitare/aether/internal/ha"
 )
 
 // Test Summary:

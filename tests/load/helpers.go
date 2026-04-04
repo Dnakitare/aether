@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/scheduler"
-	"github.com/aether-runtime/aether/internal/scheduler/distributed"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/scheduler/distributed"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // LoadTestEnvironment provides infrastructure for load tests

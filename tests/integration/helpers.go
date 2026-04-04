@@ -15,16 +15,16 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/internal/api"
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/internal/backup"
-	"github.com/aether-runtime/aether/internal/ha"
-	"github.com/aether-runtime/aether/internal/ratelimit"
-	"github.com/aether-runtime/aether/internal/runtime"
-	"github.com/aether-runtime/aether/internal/runtime/vm"
-	"github.com/aether-runtime/aether/internal/scheduler"
-	"github.com/aether-runtime/aether/internal/state"
-	pkgapi "github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/api"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/backup"
+	"github.com/dnakitare/aether/internal/ha"
+	"github.com/dnakitare/aether/internal/ratelimit"
+	"github.com/dnakitare/aether/internal/runtime"
+	"github.com/dnakitare/aether/internal/runtime/vm"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/state"
+	pkgapi "github.com/dnakitare/aether/pkg/api"
 )
 
 // TestEnvironment holds all components for integration testing

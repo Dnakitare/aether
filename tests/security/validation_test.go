@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aether-runtime/aether/internal/api"
-	apiPkg "github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/api"
+	apiPkg "github.com/dnakitare/aether/pkg/api"
 )
 
 // TestAgentNameValidation verifies agent name validation.

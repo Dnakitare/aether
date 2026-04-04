@@ -16,8 +16,8 @@ import (
 
 	_ "github.com/lib/pq"
 
-	"github.com/aether-runtime/aether/internal/recovery"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/recovery"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // setupTestDB creates a test database connection.

@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/internal/scheduler"
-	pkgapi "github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/scheduler"
+	pkgapi "github.com/dnakitare/aether/pkg/api"
 )
 
 // TestChaos_StressWithFailures tests system under load with failures

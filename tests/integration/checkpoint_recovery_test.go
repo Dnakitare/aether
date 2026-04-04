@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/internal/recovery"
-	"github.com/aether-runtime/aether/internal/runtime"
-	"github.com/aether-runtime/aether/internal/runtime/vm"
-	"github.com/aether-runtime/aether/internal/state"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/recovery"
+	"github.com/dnakitare/aether/internal/runtime"
+	"github.com/dnakitare/aether/internal/runtime/vm"
+	"github.com/dnakitare/aether/internal/state"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // setupRecoveryTest sets up a runtime with checkpoint support for testing

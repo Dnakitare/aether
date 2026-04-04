@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // TestCrossTenantAccessDenied verifies that tenants cannot access other tenants' resources.

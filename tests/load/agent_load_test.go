@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/scheduler/distributed"
+	"github.com/dnakitare/aether/internal/scheduler/distributed"
 	"github.com/stretchr/testify/require"
 )
 

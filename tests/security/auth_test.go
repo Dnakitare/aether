@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/api"
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/internal/scaler"
-	"github.com/aether-runtime/aether/internal/scheduler"
-	"github.com/aether-runtime/aether/internal/tenant"
-	pkgapi "github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/api"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/scaler"
+	"github.com/dnakitare/aether/internal/scheduler"
+	"github.com/dnakitare/aether/internal/tenant"
+	pkgapi "github.com/dnakitare/aether/pkg/api"
 )
 
 // TestAuthenticationRequired verifies that all API endpoints require authentication.
