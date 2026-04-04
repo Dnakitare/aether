@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/auth"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 func TestAPIKeyManager(t *testing.T) {

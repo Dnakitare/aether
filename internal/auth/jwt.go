@@ -3,12 +3,14 @@ package auth
 
 import (
 	"context"
+	"crypto/rsa"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // Claims represents JWT claims.
@@ -20,41 +22,84 @@ type Claims struct {
 }
 
 // JWTManager handles JWT creation and validation.
+// It supports HS256 (symmetric) when only SecretKey is provided, and RS256
+// (asymmetric) when PrivateKeyPEM / PublicKeyPEM are provided.
 type JWTManager struct {
 	secretKey     []byte
+	privateKey    *rsa.PrivateKey
+	publicKey     *rsa.PublicKey
 	tokenDuration time.Duration
 	issuer        string
 }
 
 // Config holds JWT manager configuration.
 type Config struct {
-	SecretKey     string
+	// SecretKey is used for HS256 signing. Required when PrivateKeyPath is empty.
+	SecretKey string
+
+	// PrivateKeyPath and PublicKeyPath enable RS256. When both are set, RS256 is
+	// preferred and SecretKey is ignored.
+	PrivateKeyPath string
+	PublicKeyPath  string
+
 	TokenDuration time.Duration
 	Issuer        string
 }
 
-// NewJWTManager creates a new JWT manager.
+// NewJWTManager creates a new JWT manager from cfg.
+// RS256 is used when both PrivateKeyPath and PublicKeyPath are non-empty;
+// otherwise HS256 is used and SecretKey must be set.
 func NewJWTManager(config Config) (*JWTManager, error) {
-	if config.SecretKey == "" {
-		return nil, fmt.Errorf("secret key is required")
-	}
-
 	if config.TokenDuration == 0 {
 		config.TokenDuration = 24 * time.Hour
 	}
-
 	if config.Issuer == "" {
 		config.Issuer = "aether"
 	}
 
-	return &JWTManager{
-		secretKey:     []byte(config.SecretKey),
+	m := &JWTManager{
 		tokenDuration: config.TokenDuration,
 		issuer:        config.Issuer,
-	}, nil
+	}
+
+	if config.PrivateKeyPath != "" && config.PublicKeyPath != "" {
+		privPEM, err := os.ReadFile(config.PrivateKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read JWT private key: %w", err)
+		}
+		pubPEM, err := os.ReadFile(config.PublicKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read JWT public key: %w", err)
+		}
+
+		privKey, err := jwt.ParseRSAPrivateKeyFromPEM(privPEM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse JWT private key: %w", err)
+		}
+		pubKey, err := jwt.ParseRSAPublicKeyFromPEM(pubPEM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse JWT public key: %w", err)
+		}
+
+		m.privateKey = privKey
+		m.publicKey = pubKey
+		return m, nil
+	}
+
+	// Fall back to HS256.
+	if config.SecretKey == "" {
+		return nil, fmt.Errorf("secret key is required when RSA key paths are not set")
+	}
+	m.secretKey = []byte(config.SecretKey)
+	return m, nil
 }
 
-// GenerateToken generates a JWT token for a user.
+// isRS256 reports whether this manager uses asymmetric RS256 signing.
+func (m *JWTManager) isRS256() bool {
+	return m.privateKey != nil && m.publicKey != nil
+}
+
+// GenerateToken generates a signed JWT for the given user.
 func (m *JWTManager) GenerateToken(tenantID api.TenantID, userID, role string) (string, error) {
 	now := time.Now()
 
@@ -71,8 +116,20 @@ func (m *JWTManager) GenerateToken(tenantID api.TenantID, userID, role string) (
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString(m.secretKey)
+	var (
+		token *jwt.Token
+		key   interface{}
+	)
+
+	if m.isRS256() {
+		token = jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		key = m.privateKey
+	} else {
+		token = jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		key = m.secretKey
+	}
+
+	tokenString, err := token.SignedString(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -80,9 +137,16 @@ func (m *JWTManager) GenerateToken(tenantID api.TenantID, userID, role string) (
 	return tokenString, nil
 }
 
-// ValidateToken validates a JWT token and returns the claims.
+// ValidateToken validates a JWT and returns its claims.
+// Accepts both HS256 and RS256 tokens depending on how the manager was created.
 func (m *JWTManager) ValidateToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if m.isRS256() {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return m.publicKey, nil
+		}
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
