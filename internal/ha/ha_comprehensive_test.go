@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/ha"
+	"github.com/dnakitare/aether/internal/ha"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

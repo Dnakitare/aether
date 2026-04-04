@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aether-runtime/aether/internal/ha"
+	"github.com/dnakitare/aether/internal/ha"
 )
 
 func TestElectionConfig(t *testing.T) {
