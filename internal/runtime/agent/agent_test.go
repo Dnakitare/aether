@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // MockVM is a mock implementation of the VM interface
@@ -64,7 +64,7 @@ func createTestAgent(t *testing.T, vm VM) *Agent {
 		},
 	}
 
-	return New(logger, config, vm)
+	return New(logger, config, vm, "/tmp/test-agent.log")
 }
 
 // Tests

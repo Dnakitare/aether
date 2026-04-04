@@ -77,10 +77,6 @@ func (a *Agent) GetLogs(ctx context.Context, follow bool) (io.ReadCloser, error)
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	// Construct log path from agent ID
-	// This assumes logs are stored in a predictable location
-	logPath := fmt.Sprintf("/var/log/aether/agents/%s.log", a.info.Config.ID)
-
-	streamer := NewLogStreamer(logPath)
+	streamer := NewLogStreamer(a.logPath)
 	return streamer.Stream(ctx, follow)
 }

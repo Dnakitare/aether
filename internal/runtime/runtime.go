@@ -15,10 +15,11 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/aether-runtime/aether/internal/recovery"
-	"github.com/aether-runtime/aether/internal/runtime/agent"
-	"github.com/aether-runtime/aether/internal/runtime/vm"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/optimization"
+	"github.com/dnakitare/aether/internal/recovery"
+	"github.com/dnakitare/aether/internal/runtime/agent"
+	"github.com/dnakitare/aether/internal/runtime/vm"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // StateStore defines the interface for persistent agent state storage.
@@ -26,6 +27,7 @@ type StateStore interface {
 	CreateAgent(ctx context.Context, config api.AgentConfig) error
 	GetAgent(ctx context.Context, agentID api.AgentID) (*api.AgentInfo, error)
 	ListAgents(ctx context.Context, tenantID api.TenantID) ([]*api.AgentInfo, error)
+	ListAllAgents(ctx context.Context) ([]*api.AgentInfo, error)
 	UpdateAgentStatus(ctx context.Context, agentID api.AgentID, status api.AgentStatus) error
 	SetAgentError(ctx context.Context, agentID api.AgentID, errMsg string) error
 	DeleteAgent(ctx context.Context, agentID api.AgentID) error
@@ -47,10 +49,12 @@ type Runtime struct {
 	vmManager         *vm.Manager
 	stateStore        StateStore
 	checkpointManager *recovery.CheckpointManager
+	prewarmingPool    *optimization.PrewarmingPool
 	config            Config
 
-	mu     sync.RWMutex
-	agents map[api.AgentID]*agent.Agent
+	mu             sync.RWMutex
+	agents         map[api.AgentID]*agent.Agent
+	prewarmedVMIDs map[api.AgentID]string // agentID → prewarmed VM ID, for pool discard on destroy
 }
 
 // Config holds runtime configuration.
@@ -73,18 +77,126 @@ func New(logger *slog.Logger, config Config, stateStore StateStore) (*Runtime, e
 	}
 
 	return &Runtime{
-		logger:     logger,
-		tracer:     otel.Tracer("aether.runtime"),
-		vmManager:  vmManager,
-		stateStore: stateStore,
-		config:     config,
-		agents:     make(map[api.AgentID]*agent.Agent),
+		logger:         logger,
+		tracer:         otel.Tracer("aether.runtime"),
+		vmManager:      vmManager,
+		stateStore:     stateStore,
+		config:         config,
+		agents:         make(map[api.AgentID]*agent.Agent),
+		prewarmedVMIDs: make(map[api.AgentID]string),
 	}, nil
 }
 
 // SetMetrics sets the metrics recorder (optional).
 func (r *Runtime) SetMetrics(metrics MetricsRecorder) {
 	r.metrics = metrics
+}
+
+// Reconcile loads all agents from the state store into the in-memory map.
+// Call this once after New() so that ListAgents/GetAgent work correctly after
+// a server restart. Agents that were running when the process exited are
+// transitioned to Failed because their VMs no longer exist.
+//
+// It returns the AgentInfo records for every agent that was transitioned to
+// Failed so the caller can release their quota allocations.
+func (r *Runtime) Reconcile(ctx context.Context) ([]*api.AgentInfo, error) {
+	if r.stateStore == nil {
+		return nil, nil
+	}
+
+	infos, err := r.stateStore.ListAllAgents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load agents from state store: %w", err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var failed []*api.AgentInfo
+
+	for _, info := range infos {
+		// VMs don't survive a process restart. Any agent that was mid-flight
+		// is now effectively dead — mark it failed and persist the status.
+		switch info.Status {
+		case api.AgentStatusRunning, api.AgentStatusCreating, api.AgentStatusStopping:
+			info.Status = api.AgentStatusFailed
+			info.Error = "runtime restarted"
+			if serr := r.stateStore.SetAgentError(ctx, info.Config.ID, info.Error); serr != nil {
+				r.logger.WarnContext(ctx, "failed to update agent status after reconcile",
+					"agent_id", info.Config.ID, "error", serr)
+			}
+			failed = append(failed, info)
+		}
+
+		// Populate in-memory map with a skeleton agent backed by a no-op VM.
+		// The agent is not actually running, but it is visible to ListAgents.
+		logPath := fmt.Sprintf("%s/%s/vm.log", r.config.WorkspaceDir, info.Config.ID)
+		skeleton := agent.New(r.logger, info.Config, &deadVM{}, logPath)
+		skeleton.SetInfo(*info)
+		r.agents[info.Config.ID] = skeleton
+	}
+
+	r.logger.InfoContext(ctx, "runtime reconciled from state store",
+		"agents", len(infos), "failed", len(failed))
+	return failed, nil
+}
+
+// deadVM is a no-op VM used for agents loaded from the DB after a restart.
+// Their Firecracker processes no longer exist, so all operations are inert.
+type deadVM struct{}
+
+func (d *deadVM) Start(_ context.Context) error                 { return fmt.Errorf("VM no longer exists") }
+func (d *deadVM) Stop(_ context.Context, _ time.Duration) error { return nil }
+func (d *deadVM) Destroy(_ context.Context) error               { return nil }
+func (d *deadVM) IsRunning() bool                               { return false }
+func (d *deadVM) GetMetrics(_ context.Context) (*api.AgentMetrics, error) {
+	return &api.AgentMetrics{}, nil
+}
+
+// SetPrewarmingPool attaches a pre-warming pool so CreateAgent can reuse
+// already-warm VMs instead of cold-starting every time.
+func (r *Runtime) SetPrewarmingPool(pool *optimization.PrewarmingPool) {
+	r.prewarmingPool = pool
+	// The runtime acts as the VMFactory so the pool creates real VMs.
+	pool.SetFactory(r)
+}
+
+// CreatePrewarmedVM implements optimization.VMFactory.
+// It creates a base VM with default resources for the given workload type,
+// ready to be claimed by the next matching CreateAgent call.
+func (r *Runtime) CreatePrewarmedVM(ctx context.Context, workloadType optimization.WorkloadType) (interface{}, error) {
+	vmID := fmt.Sprintf("pw-%s-%d", workloadType, time.Now().UnixNano())
+	vmPaths := vm.VMPaths{
+		KernelImage: r.config.VMManagerConfig.KernelImage,
+		RootFS:      r.config.VMManagerConfig.RootFSImage,
+		Socket:      fmt.Sprintf("%s/%s/firecracker.sock", r.config.WorkspaceDir, vmID),
+		Log:         fmt.Sprintf("%s/%s/vm.log", r.config.WorkspaceDir, vmID),
+		Metrics:     fmt.Sprintf("%s/%s/metrics.fifo", r.config.WorkspaceDir, vmID),
+		WorkDir:     fmt.Sprintf("%s/%s", r.config.WorkspaceDir, vmID),
+	}
+	baseCfg := vm.VMConfig{
+		ID:              vmID,
+		KernelImagePath: vmPaths.KernelImage,
+		RootfsPath:      vmPaths.RootFS,
+		CPUCount:        r.config.DefaultResources.CPUCount,
+		MemoryMB:        r.config.DefaultResources.MemoryMB,
+		SocketPath:      vmPaths.Socket,
+		LogPath:         vmPaths.Log,
+		MetricsPath:     vmPaths.Metrics,
+	}
+	return r.vmManager.Create(ctx, baseCfg)
+}
+
+// workloadTypeForConfig maps an agent config to the appropriate pool workload type.
+func workloadTypeForConfig(config api.AgentConfig) optimization.WorkloadType {
+	switch {
+	case config.Resources.MemoryMB >= 4096:
+		return optimization.WorkloadLLMAgent
+	case config.Resources.CPUCount >= 4:
+		return optimization.WorkloadDataProcessing
+	default:
+		return optimization.WorkloadCodeExecution
+	}
 }
 
 // CreateAgent creates a new agent with the given configuration.
@@ -138,6 +250,36 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	}
 	r.mu.RUnlock()
 
+	// Persist to state store first — if this fails we haven't created any
+	// infrastructure yet, so there's nothing to clean up.
+	if r.stateStore != nil {
+		span.AddEvent("persisting_to_state_store")
+		if err := r.stateStore.CreateAgent(ctx, config); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to persist agent")
+
+			if r.metrics != nil {
+				r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
+				r.metrics.RecordAgentError("state_store_failed", config.TenantID)
+			}
+
+			return fmt.Errorf("failed to persist agent to state store: %w", err)
+		}
+	}
+
+	// Try to claim a pre-warmed VM from the pool before cold-creating one.
+	var prewarmedVM *optimization.PrewarmedVM
+	if r.prewarmingPool != nil {
+		wt := workloadTypeForConfig(config)
+		if pvm, err := r.prewarmingPool.AcquireVM(ctx, wt); err == nil {
+			prewarmedVM = pvm
+			span.AddEvent("prewarmed_vm_acquired", trace.WithAttributes(
+				attribute.String("prewarmed_vm_id", pvm.ID),
+			))
+		}
+		// AcquireVM failure is non-fatal — fall back to cold creation.
+	}
+
 	// Create VM configuration
 	vmPaths := vm.VMPaths{
 		KernelImage: r.config.VMManagerConfig.KernelImage,
@@ -150,14 +292,33 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 
 	vmConfig := vm.FromAgentConfig(config, vmPaths)
 
-	// Create the VM
-	span.AddEvent("creating_vm")
-	vmInstance, err := r.vmManager.Create(ctx, vmConfig)
+	// If we have a real pre-warmed VM, use it directly; otherwise cold-create.
+	var vmInstance *vm.VM
+	if prewarmedVM != nil && prewarmedVM.VM != nil {
+		if realVM, ok := prewarmedVM.VM.(*vm.VM); ok {
+			vmInstance = realVM
+			span.AddEvent("using_prewarmed_vm")
+		}
+	}
+
+	var err error
+	if vmInstance == nil {
+		// Cold creation path.
+		span.AddEvent("creating_vm")
+		vmInstance, err = r.vmManager.Create(ctx, vmConfig)
+	}
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "failed to create VM")
 
-		// Record error metric
+		// Roll back the state store record since VM creation failed.
+		if r.stateStore != nil {
+			if derr := r.stateStore.DeleteAgent(ctx, config.ID); derr != nil {
+				r.logger.ErrorContext(ctx, "failed to delete agent record after VM creation failure",
+					"agent_id", config.ID, "error", derr)
+			}
+		}
+
 		if r.metrics != nil {
 			r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
 			r.metrics.RecordAgentError("vm_creation_failed", config.TenantID)
@@ -171,28 +332,17 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	vmAdapter := &vmAdapter{vm: vmInstance}
 
 	// Create the agent
-	agentInstance := agent.New(r.logger, config, vmAdapter)
+	agentInstance := agent.New(r.logger, config, vmAdapter, vmPaths.Log)
 
 	// Store the agent in memory
 	r.mu.Lock()
 	r.agents[config.ID] = agentInstance
+	if prewarmedVM != nil {
+		r.prewarmedVMIDs[config.ID] = prewarmedVM.ID
+	}
 	r.mu.Unlock()
 
 	span.SetAttributes(attribute.Int("runtime.agent_count", len(r.agents)))
-
-	// Persist to state store if available
-	if r.stateStore != nil {
-		span.AddEvent("persisting_to_state_store")
-		if err := r.stateStore.CreateAgent(ctx, config); err != nil {
-			r.logger.ErrorContext(ctx, "failed to persist agent to state store",
-				"agent_id", config.ID,
-				"error", err,
-			)
-			span.RecordError(err)
-			span.AddEvent("state_store_persistence_failed")
-			// Continue anyway - agent exists in memory
-		}
-	}
 
 	// Record successful agent creation metrics
 	if r.metrics != nil {
@@ -270,10 +420,16 @@ func (r *Runtime) DestroyAgent(ctx context.Context, id api.AgentID) error {
 		return fmt.Errorf("failed to destroy agent: %w", err)
 	}
 
-	// Remove from memory
+	// Remove from memory and discard prewarmed VM tracking.
 	r.mu.Lock()
 	delete(r.agents, id)
+	pwID := r.prewarmedVMIDs[id]
+	delete(r.prewarmedVMIDs, id)
 	r.mu.Unlock()
+
+	if pwID != "" && r.prewarmingPool != nil {
+		r.prewarmingPool.DiscardVM(pwID)
+	}
 
 	// Delete from state store
 	if r.stateStore != nil {
@@ -593,19 +749,9 @@ func (v *vmAdapter) Destroy(ctx context.Context) error {
 }
 
 func (v *vmAdapter) IsRunning() bool {
-	// Check if the VM process is still running
-	// This is a simplified check - in production, verify via API
-	return v.vm.Config.SocketPath != ""
+	return v.vm.IsRunning()
 }
 
 func (v *vmAdapter) GetMetrics(ctx context.Context) (*api.AgentMetrics, error) {
-	// In a real implementation, query Firecracker metrics API
-	// For now, return mock metrics
-	return &api.AgentMetrics{
-		CPUUsagePercent: 0.0,
-		MemoryUsageMB:   0,
-		NetworkRxBytes:  0,
-		NetworkTxBytes:  0,
-		LastUpdated:     time.Now(),
-	}, nil
+	return v.vm.GetMetrics(ctx)
 }

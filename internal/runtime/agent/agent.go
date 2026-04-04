@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // Agent represents a running agent instance.
@@ -19,6 +19,9 @@ type Agent struct {
 
 	// vm is the underlying VM instance (interface for testability)
 	vm VM
+
+	// logPath is the filesystem path to this agent's VM log file.
+	logPath string
 
 	// stopChan is closed when the agent should stop
 	stopChan chan struct{}
@@ -37,8 +40,9 @@ type VM interface {
 	GetMetrics(ctx context.Context) (*api.AgentMetrics, error)
 }
 
-// New creates a new agent instance.
-func New(logger *slog.Logger, config api.AgentConfig, vm VM) *Agent {
+// New creates a new agent instance. logPath is the filesystem path to the VM's
+// log file (e.g. "{workspaceDir}/{agentID}/vm.log").
+func New(logger *slog.Logger, config api.AgentConfig, vm VM, logPath string) *Agent {
 	now := time.Now()
 
 	return &Agent{
@@ -49,6 +53,7 @@ func New(logger *slog.Logger, config api.AgentConfig, vm VM) *Agent {
 		},
 		logger:           logger.With("agent_id", config.ID, "tenant_id", config.TenantID),
 		vm:               vm,
+		logPath:          logPath,
 		stopChan:         make(chan struct{}),
 		metricsCollector: NewMetricsCollector(logger, string(config.ID)),
 	}
@@ -138,6 +143,14 @@ func (a *Agent) Destroy(ctx context.Context) error {
 
 	a.logger.InfoContext(ctx, "agent destroyed")
 	return nil
+}
+
+// SetInfo overwrites the agent's info. Used during startup reconciliation to
+// restore state loaded from the DB without constructing a new Agent.
+func (a *Agent) SetInfo(info api.AgentInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.info = info
 }
 
 // GetInfo returns the current agent information.

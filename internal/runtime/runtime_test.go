@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aether-runtime/aether/internal/runtime/vm"
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/internal/runtime/vm"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // Mock implementations
@@ -52,6 +52,14 @@ func (m *MockStateStore) UpdateAgentStatus(ctx context.Context, agentID api.Agen
 func (m *MockStateStore) SetAgentError(ctx context.Context, agentID api.AgentID, errMsg string) error {
 	args := m.Called(ctx, agentID, errMsg)
 	return args.Error(0)
+}
+
+func (m *MockStateStore) ListAllAgents(ctx context.Context) ([]*api.AgentInfo, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*api.AgentInfo), args.Error(1)
 }
 
 func (m *MockStateStore) DeleteAgent(ctx context.Context, agentID api.AgentID) error {
@@ -165,6 +173,9 @@ func TestCreateAgent(t *testing.T) {
 		// This test documents that CreateAgent requires actual VM infrastructure
 		// which is not available in unit tests. VM creation will fail.
 		mockStore := new(MockStateStore)
+		// State is persisted before VM creation; mock must accept the create call.
+		mockStore.On("CreateAgent", mock.Anything, mock.Anything).Return(nil)
+		mockStore.On("DeleteAgent", mock.Anything, mock.Anything).Return(nil)
 		runtime := createTestRuntime(t, mockStore)
 
 		config := createTestAgentConfig()
@@ -178,6 +189,8 @@ func TestCreateAgent(t *testing.T) {
 	t.Run("default resources applied when not specified", func(t *testing.T) {
 		// Test that default resources are applied to config
 		mockStore := new(MockStateStore)
+		mockStore.On("CreateAgent", mock.Anything, mock.Anything).Return(nil)
+		mockStore.On("DeleteAgent", mock.Anything, mock.Anything).Return(nil)
 		runtime := createTestRuntime(t, mockStore)
 
 		config := createTestAgentConfig()
@@ -192,6 +205,8 @@ func TestCreateAgent(t *testing.T) {
 
 	t.Run("metrics recorded on operations", func(t *testing.T) {
 		mockStore := new(MockStateStore)
+		mockStore.On("CreateAgent", mock.Anything, mock.Anything).Return(nil)
+		mockStore.On("DeleteAgent", mock.Anything, mock.Anything).Return(nil)
 		mockMetrics := new(MockMetricsRecorder)
 		runtime := createTestRuntime(t, mockStore)
 		runtime.SetMetrics(mockMetrics)
@@ -353,22 +368,18 @@ func TestCheckpointMethods(t *testing.T) {
 }
 
 func TestVMAdapter(t *testing.T) {
-	t.Run("IsRunning checks socket path", func(t *testing.T) {
+	t.Run("IsRunning returns false when no process is set", func(t *testing.T) {
+		// A VM that was never started (no cmd) must not be considered running.
 		vmInstance := &vm.VM{
 			Config: vm.VMConfig{
 				SocketPath: "/tmp/test.sock",
 			},
 		}
-
 		adapter := &vmAdapter{vm: vmInstance}
-		assert.True(t, adapter.IsRunning())
-
-		// Empty socket path means not running
-		vmInstance.Config.SocketPath = ""
 		assert.False(t, adapter.IsRunning())
 	})
 
-	t.Run("GetMetrics returns mock data", func(t *testing.T) {
+	t.Run("GetMetrics returns zeros when process is not running", func(t *testing.T) {
 		vmInstance := &vm.VM{}
 		adapter := &vmAdapter{vm: vmInstance}
 

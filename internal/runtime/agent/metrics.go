@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // MetricsCollector periodically collects metrics from an agent's VM.
@@ -29,6 +29,7 @@ func NewMetricsCollector(logger *slog.Logger, agentID string) *MetricsCollector 
 		agentID:  agentID,
 		interval: 5 * time.Second, // Collect metrics every 5 seconds
 		stopCh:   make(chan struct{}),
+		stopped:  true, // starts in stopped state; Start() transitions to running
 	}
 }
 
@@ -41,9 +42,10 @@ func (mc *MetricsCollector) Start(ctx context.Context, vm VM) {
 	}
 	mc.stopped = false
 	mc.stopCh = make(chan struct{})
+	stopCh := mc.stopCh // capture before releasing lock to avoid race in collectLoop
 	mc.mu.Unlock()
 
-	go mc.collectLoop(ctx, vm)
+	go mc.collectLoop(ctx, vm, stopCh)
 }
 
 // Stop stops the metrics collector.
@@ -73,8 +75,10 @@ func (mc *MetricsCollector) GetLatest() *api.AgentMetrics {
 	return &metricsCopy
 }
 
-// collectLoop is the main collection loop.
-func (mc *MetricsCollector) collectLoop(ctx context.Context, vm VM) {
+// collectLoop is the main collection loop. stopCh is passed explicitly so the
+// goroutine holds its own reference and avoids a race with Start() replacing
+// mc.stopCh when the collector is restarted.
+func (mc *MetricsCollector) collectLoop(ctx context.Context, vm VM, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(mc.interval)
 	defer ticker.Stop()
 
@@ -82,7 +86,7 @@ func (mc *MetricsCollector) collectLoop(ctx context.Context, vm VM) {
 
 	for {
 		select {
-		case <-mc.stopCh:
+		case <-stopCh:
 			mc.logger.DebugContext(ctx, "metrics collector stopped")
 			return
 		case <-ctx.Done():
