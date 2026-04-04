@@ -5,19 +5,27 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 
 	"github.com/golang-migrate/migrate/v4"
+	migratedb "github.com/golang-migrate/migrate/v4/database"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 // MigrationConfig holds migration configuration.
 type MigrationConfig struct {
-	// MigrationsPath is the directory containing migration files
+	// MigrationsFS is the preferred source: an embedded or real filesystem
+	// containing migration files. When set, MigrationsPath is ignored.
+	MigrationsFS fs.FS
+
+	// MigrationsPath is the directory containing migration files.
+	// Used only when MigrationsFS is nil (legacy file:// mode).
 	MigrationsPath string
 
-	// DatabaseName is used for the migration lock table
+	// DatabaseName is used for the migration lock table.
 	DatabaseName string
 }
 
@@ -29,9 +37,34 @@ func DefaultMigrationConfig() MigrationConfig {
 	}
 }
 
+// newMigrate constructs a migrate.Migrate from config and an already-created postgres driver.
+func newMigrate(config MigrationConfig, driver migratedb.Driver) (*migrate.Migrate, error) {
+	if config.MigrationsFS != nil {
+		src, err := iofs.New(config.MigrationsFS, ".")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create iofs source: %w", err)
+		}
+		m, err := migrate.NewWithInstance("iofs", src, config.DatabaseName, driver)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create migration instance: %w", err)
+		}
+		return m, nil
+	}
+
+	m, err := migrate.NewWithDatabaseInstance(
+		fmt.Sprintf("file://%s", config.MigrationsPath),
+		config.DatabaseName,
+		driver,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create migration instance: %w", err)
+	}
+	return m, nil
+}
+
 // RunMigrations runs database migrations up to the latest version.
 func RunMigrations(logger *slog.Logger, db *sql.DB, config MigrationConfig) error {
-	if config.MigrationsPath == "" {
+	if config.MigrationsPath == "" && config.MigrationsFS == nil {
 		config.MigrationsPath = "migrations"
 	}
 
@@ -39,9 +72,12 @@ func RunMigrations(logger *slog.Logger, db *sql.DB, config MigrationConfig) erro
 		config.DatabaseName = "aether"
 	}
 
-	logger.Info("starting database migrations", "path", config.MigrationsPath)
+	if config.MigrationsFS != nil {
+		logger.Info("starting database migrations", "source", "embedded")
+	} else {
+		logger.Info("starting database migrations", "path", config.MigrationsPath)
+	}
 
-	// Create postgres driver instance
 	driver, err := postgres.WithInstance(db, &postgres.Config{
 		DatabaseName: config.DatabaseName,
 	})
@@ -49,14 +85,9 @@ func RunMigrations(logger *slog.Logger, db *sql.DB, config MigrationConfig) erro
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	// Create migrate instance
-	m, err := migrate.NewWithDatabaseInstance(
-		fmt.Sprintf("file://%s", config.MigrationsPath),
-		config.DatabaseName,
-		driver,
-	)
+	m, err := newMigrate(config, driver)
 	if err != nil {
-		return fmt.Errorf("failed to create migration instance: %w", err)
+		return err
 	}
 	defer m.Close()
 
@@ -66,7 +97,6 @@ func RunMigrations(logger *slog.Logger, db *sql.DB, config MigrationConfig) erro
 		return fmt.Errorf("failed to get current migration version: %w", err)
 	}
 
-	// Check for dirty state
 	if dirty {
 		logger.Error("database is in dirty state - manual intervention required",
 			"version", currentVersion,
@@ -110,7 +140,7 @@ func RunMigrations(logger *slog.Logger, db *sql.DB, config MigrationConfig) erro
 // MigrateDown rolls back the last migration.
 // WARNING: This can result in data loss!
 func MigrateDown(logger *slog.Logger, db *sql.DB, config MigrationConfig) error {
-	if config.MigrationsPath == "" {
+	if config.MigrationsPath == "" && config.MigrationsFS == nil {
 		config.MigrationsPath = "migrations"
 	}
 
@@ -120,7 +150,6 @@ func MigrateDown(logger *slog.Logger, db *sql.DB, config MigrationConfig) error 
 
 	logger.Warn("rolling back last migration - this may result in data loss")
 
-	// Create postgres driver instance
 	driver, err := postgres.WithInstance(db, &postgres.Config{
 		DatabaseName: config.DatabaseName,
 	})
@@ -128,18 +157,12 @@ func MigrateDown(logger *slog.Logger, db *sql.DB, config MigrationConfig) error 
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	// Create migrate instance
-	m, err := migrate.NewWithDatabaseInstance(
-		fmt.Sprintf("file://%s", config.MigrationsPath),
-		config.DatabaseName,
-		driver,
-	)
+	m, err := newMigrate(config, driver)
 	if err != nil {
-		return fmt.Errorf("failed to create migration instance: %w", err)
+		return err
 	}
 	defer m.Close()
 
-	// Get current version
 	currentVersion, dirty, err := m.Version()
 	if err != nil {
 		return fmt.Errorf("failed to get current version: %w", err)
@@ -149,13 +172,10 @@ func MigrateDown(logger *slog.Logger, db *sql.DB, config MigrationConfig) error 
 		return fmt.Errorf("database is in dirty state at version %d", currentVersion)
 	}
 
-	// Rollback one step
-	err = m.Steps(-1)
-	if err != nil {
+	if err := m.Steps(-1); err != nil {
 		return fmt.Errorf("failed to rollback migration: %w", err)
 	}
 
-	// Get new version
 	newVersion, _, err := m.Version()
 	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
 		return fmt.Errorf("failed to get version after rollback: %w", err)
@@ -182,13 +202,9 @@ func GetVersion(logger *slog.Logger, db *sql.DB, config MigrationConfig) (uint, 
 		return 0, false, fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		fmt.Sprintf("file://%s", config.MigrationsPath),
-		config.DatabaseName,
-		driver,
-	)
+	m, err := newMigrate(config, driver)
 	if err != nil {
-		return 0, false, fmt.Errorf("failed to create migration instance: %w", err)
+		return 0, false, err
 	}
 	defer m.Close()
 

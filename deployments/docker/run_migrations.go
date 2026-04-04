@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/aether-runtime/aether/internal/database"
+	"github.com/dnakitare/aether/internal/database"
 	_ "github.com/lib/pq"
 )
 
