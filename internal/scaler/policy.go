@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // TargetType represents what the scaling policy targets.

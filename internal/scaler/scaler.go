@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aether-runtime/aether/pkg/api"
+	"github.com/dnakitare/aether/pkg/api"
 )
 
 // Scaler manages automatic scaling of agents based on metrics.
@@ -26,7 +26,8 @@ type Scaler struct {
 	executor ScaleExecutor
 
 	// Stop channel
-	stopCh chan struct{}
+	stopCh   chan struct{}
+	stopOnce sync.Once
 
 	// Evaluation interval
 	interval time.Duration
@@ -108,9 +109,9 @@ func (s *Scaler) Start(ctx context.Context) {
 	}
 }
 
-// Stop stops the auto-scaler.
+// Stop stops the auto-scaler. Safe to call more than once.
 func (s *Scaler) Stop() {
-	close(s.stopCh)
+	s.stopOnce.Do(func() { close(s.stopCh) })
 }
 
 // AddPolicy adds a scaling policy.
@@ -268,11 +269,34 @@ func (s *Scaler) evaluateTenantPolicy(ctx context.Context, policy *Policy) (shou
 			shouldScale = true
 			scaleUp = false
 			delta = policy.ScaleDown.Delta
-			return
+			break
 		}
 	}
 
-	return false, false, 0, nil
+	// Enforce MinReplicas/MaxReplicas bounds before committing to a scale action.
+	if shouldScale {
+		currentCount := metrics.AgentCount
+		if scaleUp && currentCount >= policy.MaxReplicas {
+			// Already at max — suppress scale-up.
+			return false, false, 0, nil
+		}
+		if !scaleUp && currentCount <= policy.MinReplicas {
+			// Already at min — suppress scale-down.
+			return false, false, 0, nil
+		}
+		// Clamp delta so we don't overshoot the bounds.
+		if scaleUp && currentCount+delta > policy.MaxReplicas {
+			delta = policy.MaxReplicas - currentCount
+		}
+		if !scaleUp && currentCount-delta < policy.MinReplicas {
+			delta = currentCount - policy.MinReplicas
+		}
+		if delta <= 0 {
+			return false, false, 0, nil
+		}
+	}
+
+	return shouldScale, scaleUp, delta, nil
 }
 
 // evaluateAgentPolicy evaluates an agent-level scaling policy.
@@ -315,7 +339,7 @@ func (s *Scaler) isInCooldown(policyName string) bool {
 		return false
 	}
 
-	return time.Since(lastAction) < time.Minute // Simplified check
+	return time.Now().Before(lastAction) // lastAction stores the expiry time
 }
 
 // setCooldown sets the cooldown for a policy.
