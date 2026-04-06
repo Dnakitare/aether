@@ -296,8 +296,8 @@ jobs:
           file: ./deployments/docker/Dockerfile
           push: false
           tags: |
-            aether-runtime/aether:${{ steps.extract_branch.outputs.branch }}
-            aether-runtime/aether:${{ steps.extract_branch.outputs.branch }}-${{ steps.extract_branch.outputs.short_sha }}
+            dnakitare/aether:${{ steps.extract_branch.outputs.branch }}
+            dnakitare/aether:${{ steps.extract_branch.outputs.branch }}-${{ steps.extract_branch.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

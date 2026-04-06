@@ -953,7 +953,7 @@ def verify_webhook(payload, signature, secret):
 Official SDKs are available for popular languages:
 
 - **Python:** `pip install aether-client`
-- **Go:** `go get github.com/aether-runtime/go-client`
+- **Go:** `go get github.com/dnakitare/aether-go-client`
 - **Node.js:** `npm install @aether/client`
 - **Java:** Maven/Gradle (see docs)
 
@@ -993,7 +993,7 @@ agent.stop()
 - **Documentation:** https://docs.aether.example.com
 - **API Status:** https://status.aether.example.com
 - **Support:** support@aether.example.com
-- **GitHub:** https://github.com/aether-runtime/aether
+- **GitHub:** https://github.com/dnakitare/aether
 
 ---
 

@@ -60,7 +60,7 @@ Aether supports three primary deployment methods:
 
 ```bash
 # Clone repository
-git clone https://github.com/aether-runtime/aether.git
+git clone https://github.com/dnakitare/aether.git
 cd aether
 
 # Configure environment
@@ -82,7 +82,7 @@ version: '3.9'
 
 services:
   aether:
-    image: ghcr.io/aether-runtime/aether:0.2.0-beta
+    image: ghcr.io/dnakitare/aether:0.2.0-beta
     ports:
       - "8080:8080"
     environment:
@@ -127,7 +127,7 @@ volumes:
 
 ```bash
 # Add Helm repository (when available)
-helm repo add aether https://aether-runtime.github.io/helm-charts
+helm repo add aether https://dnakitare.github.io/helm-charts
 helm repo update
 
 # Install with Helm
@@ -520,7 +520,7 @@ scrape_configs:
 Import pre-configured Grafana dashboards:
 
 ```bash
-# Located in deployments/monitoring/grafana/dashboards/
+# Located in deployments/grafana/dashboards/
 - system-overview.json
 - agent-metrics.json
 - scheduler-performance.json
@@ -592,8 +592,8 @@ See the [Troubleshooting Guide](./TROUBLESHOOTING.md) for common issues and solu
 
 ## Support
 
-- **Documentation**: https://aether-runtime.github.io/docs
-- **GitHub Issues**: https://github.com/aether-runtime/aether/issues
+- **Documentation**: https://dnakitare.github.io/docs
+- **GitHub Issues**: https://github.com/dnakitare/aether/issues
 - **Community**: https://discord.gg/aether
 
 ---

@@ -666,10 +666,10 @@ go tool pprof -http=:8081 block.prof
 
 If you can't resolve an issue:
 
-1. **Check documentation**: https://aether-runtime.github.io/docs
-2. **Search issues**: https://github.com/aether-runtime/aether/issues
+1. **Check documentation**: https://dnakitare.github.io/docs
+2. **Search issues**: https://github.com/dnakitare/aether/issues
 3. **Ask community**: https://discord.gg/aether
-4. **Create issue**: https://github.com/aether-runtime/aether/issues/new
+4. **Create issue**: https://github.com/dnakitare/aether/issues/new
 
 When reporting issues, include:
 - Aether version

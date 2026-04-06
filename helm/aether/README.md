@@ -77,7 +77,7 @@ helm install aether ./helm/aether \
 |-----------|-------------|---------|
 | `apiServer.enabled` | Enable API server | `true` |
 | `apiServer.replicaCount` | Number of replicas | `2` |
-| `apiServer.image.repository` | Image repository | `ghcr.io/aether-runtime/aether` |
+| `apiServer.image.repository` | Image repository | `ghcr.io/dnakitare/aether` |
 | `apiServer.image.tag` | Image tag | `0.2.0-beta` |
 | `apiServer.service.type` | Service type | `ClusterIP` |
 | `apiServer.service.port` | Service port | `8080` |
@@ -416,9 +416,9 @@ Minimal RBAC permissions:
 
 ## Support
 
-- Documentation: https://github.com/aether-runtime/aether
-- Issues: https://github.com/aether-runtime/aether/issues
-- Discussions: https://github.com/aether-runtime/aether/discussions
+- Documentation: https://github.com/dnakitare/aether
+- Issues: https://github.com/dnakitare/aether/issues
+- Discussions: https://github.com/dnakitare/aether/discussions
 
 ## License
 

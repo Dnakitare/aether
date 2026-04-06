@@ -114,8 +114,8 @@ CREATE TABLE checkpoints (
 import (
     "context"
     "database/sql"
-    "github.com/aether-runtime/aether/internal/runtime"
-    "github.com/aether-runtime/aether/pkg/api"
+    "github.com/dnakitare/aether/internal/runtime"
+    "github.com/dnakitare/aether/pkg/api"
 )
 
 // 1. Create runtime
@@ -295,7 +295,7 @@ if err != nil {
 For more control, use `CheckpointManager` directly:
 
 ```go
-import "github.com/aether-runtime/aether/internal/recovery"
+import "github.com/dnakitare/aether/internal/recovery"
 
 config := recovery.DefaultCheckpointConfig()
 config.RetentionCount = 20  // Keep 20 checkpoints

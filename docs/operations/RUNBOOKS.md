@@ -92,7 +92,7 @@ Step-by-step procedures for common operational tasks and incident response.
 2. **Download new version:**
    ```bash
    VERSION="1.1.0"
-   wget https://github.com/aether-runtime/aether/releases/download/v${VERSION}/aether-linux-amd64
+   wget https://github.com/dnakitare/aether/releases/download/v${VERSION}/aether-linux-amd64
    chmod +x aether-linux-amd64
    ```
 

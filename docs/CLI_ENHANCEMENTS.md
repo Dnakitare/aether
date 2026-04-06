@@ -260,7 +260,7 @@ Location: `internal/cli/output.go`
 **Example Usage:**
 
 ```go
-import "github.com/aether-runtime/aether/internal/cli"
+import "github.com/dnakitare/aether/internal/cli"
 
 // Success message
 cli.Success("Agent created successfully")

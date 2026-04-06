@@ -23,7 +23,7 @@ Run: `make bench`
 ```
 goos: darwin
 goarch: arm64
-pkg: github.com/aether-runtime/aether/tests/load
+pkg: github.com/dnakitare/aether/tests/load
 cpu: Apple M2
 
 BenchmarkSchedulerPlacement-8              	 5247812	       221.8 ns/op	     272 B/op	       5 allocs/op

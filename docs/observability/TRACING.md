@@ -20,7 +20,7 @@ curl http://localhost:16686/
 Tracing is configured via the API server config:
 
 ```go
-import "github.com/aether-runtime/aether/internal/observability"
+import "github.com/dnakitare/aether/internal/observability"
 
 tracerConfig := &observability.TracerConfig{
     Enabled:       true,

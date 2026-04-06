@@ -726,9 +726,9 @@ http://localhost:8080/swagger-ui
 
 ## Support
 
-- **Documentation**: https://aether-runtime.github.io/docs
-- **API Reference**: https://aether-runtime.github.io/api
-- **GitHub**: https://github.com/aether-runtime/aether
+- **Documentation**: https://dnakitare.github.io/docs
+- **API Reference**: https://dnakitare.github.io/api
+- **GitHub**: https://github.com/dnakitare/aether
 - **Community**: https://discord.gg/aether
 
 ---

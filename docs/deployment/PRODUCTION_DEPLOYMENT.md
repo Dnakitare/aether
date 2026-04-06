@@ -172,7 +172,7 @@ This guide covers production deployment of Aether with:
 
 **Clone the repository:**
 ```bash
-git clone https://github.com/aether-runtime/aether.git
+git clone https://github.com/dnakitare/aether.git
 cd aether/deployments/terraform/aws
 ```
 
@@ -282,7 +282,7 @@ ssh -i your-key.pem ec2-user@$CONTROL_PLANE_IP
 
 Download Aether:
 ```bash
-wget https://github.com/aether-runtime/aether/releases/download/v1.0.0/aether-linux-amd64
+wget https://github.com/dnakitare/aether/releases/download/v1.0.0/aether-linux-amd64
 chmod +x aether-linux-amd64
 sudo mv aether-linux-amd64 /usr/local/bin/aether
 ```

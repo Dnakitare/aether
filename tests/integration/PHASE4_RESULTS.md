@@ -115,7 +115,7 @@ Phase 4 successfully implemented and tested the distributed scheduler architectu
 --- PASS: TestDistributedScheduler_FailoverScenario (39.04s)
 
 PASS
-ok  	github.com/aether-runtime/aether/tests/integration	52.835s
+ok  	github.com/dnakitare/aether/tests/integration	52.835s
 ```
 
 ### Test Breakdown
