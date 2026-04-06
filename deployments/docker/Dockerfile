@@ -92,9 +92,10 @@ USER 10001:10001
 # Expose API port
 EXPOSE 8080
 
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/local/bin/aether", "healthcheck"]
+# Health checks: Use orchestrator probes (Kubernetes liveness/readiness) rather
+# than Docker HEALTHCHECK, since the distroless base image has no shell or curl.
+# The API exposes GET /health (liveness) and GET /readiness (dependency checks)
+# on the internal metrics port (default :9091).
 
 # Set OCI metadata labels
 ARG VERSION

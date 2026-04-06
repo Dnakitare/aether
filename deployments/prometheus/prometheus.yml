@@ -9,6 +9,17 @@ global:
     cluster: 'aether-dev'
     environment: 'development'
 
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Rule files to load
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 # Scrape configurations
 scrape_configs:
   # Aether API server metrics

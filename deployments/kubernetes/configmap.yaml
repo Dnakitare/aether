@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aether-config
+  namespace: aether
+  labels:
+    app.kubernetes.io/name: aether
+    app.kubernetes.io/component: server
+data:
+  # HTTP API listen address
+  SERVER_ADDRESS: ":8080"
+  # Internal metrics/health address (not exposed publicly)
+  METRICS_ADDRESS: ":9091"
+  # Enable JWT authentication (set to "false" only for local dev)
+  AUTH_ENABLED: "true"
+  # Enable CORS headers
+  CORS_ENABLED: "false"
+  # Firecracker binary path on the node (requires privileged daemonset or host path mount)
+  FIRECRACKER_BINARY: "/usr/local/bin/firecracker"
+  # VM workspace on the node
+  AETHER_WORKSPACE: "/var/lib/aether/vms"
+  # Kernel and rootfs image paths on the node
+  AETHER_KERNEL_IMAGE: "/var/lib/aether/images/vmlinux"
+  AETHER_ROOTFS_IMAGE: "/var/lib/aether/images/rootfs.ext4"

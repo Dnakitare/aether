@@ -11,21 +11,20 @@ keywords:
   - agents
   - containers
 
-home: https://github.com/aether-runtime/aether
+home: https://github.com/dnakitare/aether
 sources:
-  - https://github.com/aether-runtime/aether
+  - https://github.com/dnakitare/aether
 
 maintainers:
   - name: Aether Team
-    email: team@aether.io
+    email: aether@kitumsystems.com
 
-# Dependencies (optional - for external charts)
-# dependencies:
-#   - name: postgresql
-#     version: "12.x.x"
-#     repository: "https://charts.bitnami.com/bitnami"
-#     condition: postgresql.enabled
-#   - name: redis
-#     version: "17.x.x"
-#     repository: "https://charts.bitnami.com/bitnami"
-#     condition: redis.enabled
+dependencies:
+  - name: postgresql
+    version: "~12"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "~17"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
