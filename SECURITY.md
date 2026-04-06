@@ -4,10 +4,11 @@
 
 We provide security updates for the following versions:
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| Version   | Supported          |
+| --------- | ------------------ |
+| 0.2.x     | :white_check_mark: |
+| 0.1.x     | :white_check_mark: |
+| < 0.1     | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -17,7 +18,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 **DO NOT** open a public GitHub issue for security vulnerabilities.
 
-Instead, please email: **security@aether.example.com** (replace with actual email)
+Instead, please email: **aether-security@kitumsystems.com**
 
 Include in your report:
 - Description of the vulnerability
@@ -96,7 +97,7 @@ We do not currently offer a bug bounty program, but we recognize security resear
 
 ### Authentication & Authorization
 
-- **JWT-based authentication** with RS256 signing
+- **JWT-based authentication** with HS256 signing (RS256 supported via key files)
 - **Multi-tenancy isolation** enforced at API and data layers
 - **Role-based access control (RBAC)** for fine-grained permissions
 - **API key authentication** for service-to-service communication
@@ -211,9 +212,9 @@ Specific compliance requirements:
 
 ## Security Contacts
 
-- **General Security**: security@aether.example.com
-- **Vulnerability Reports**: security@aether.example.com
-- **Compliance Questions**: compliance@aether.example.com
+- **General Security**: aether-security@kitumsystems.com
+- **Vulnerability Reports**: aether-security@kitumsystems.com
+- **Compliance Questions**: aether@kitumsystems.com
 
 ## Resources
 

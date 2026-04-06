@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to Aether! We're excited to have you join our community building a modern AI agent runtime.
 
-**Project Status:** Alpha v0.1.0 - Core functionality complete, Beta features in development
+**Project Status:** Beta v0.2.0 - All core components integrated with observability, deployment automation, and distributed scheduling
 
 ---
 
@@ -84,7 +84,7 @@ Feature suggestions are welcome! Please:
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.24 or later
 - Docker and Docker Compose
 - Firecracker (for local testing)
 - Make
@@ -354,7 +354,7 @@ How was this tested?
 
 For significant architectural changes, create an Architecture Decision Record (ADR):
 
-1. Copy `docs/architecture/adr/000-template.md`
+1. Create a new file `docs/architecture/adr/NNN-title.md` (see existing ADRs 001-008 for format)
 2. Fill in the ADR with context, decision, and consequences
 3. Submit as part of your PR
 

@@ -1,18 +1,18 @@
 # Aether
 
-**Modern AI Agent Runtime with Hardware-Level Isolation** (Alpha v0.1.0)
+**Modern AI Agent Runtime with Hardware-Level Isolation** (Beta v0.2.0)
 
 [![Build Status](https://img.shields.io/github/workflow/status/dnakitare/aether/CI)](https://github.com/dnakitare/aether/actions)
-[![Go Version](https://img.shields.io/badge/go-1.21-blue)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.24-blue)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Development Status](https://img.shields.io/badge/status-alpha-yellow)](https://github.com/dnakitare/aether)
+[![Development Status](https://img.shields.io/badge/status-beta-blue)](https://github.com/dnakitare/aether)
 
 Aether is a runtime for AI agents with secure isolation, intelligent orchestration, and observability. Built on **Firecracker microVMs**, Aether is designed to run untrusted workloads safely and efficiently.
 
 **Think Docker for AI agents** – but with security and multi-tenancy from day one.
 
-> ⚠️ **Project Status: Alpha v0.1.0**
-> Aether has reached alpha with end-to-end agent lifecycle working. Core components are integrated and functional. Not ready for production use. Expected beta release: April 2026.
+> ⚠️ **Project Status: Beta v0.2.0**
+> Aether has reached beta with all core components integrated: HTTP API, distributed scheduler, PostgreSQL persistence, Kafka messaging, OpenTelemetry observability, and Kubernetes/Terraform deployment. Not yet recommended for production workloads. Targeting v1.0 in Q3 2026.
 
 ---
 
@@ -110,7 +110,7 @@ Aether is a runtime for AI agents with secure isolation, intelligent orchestrati
 ### Prerequisites
 
 - **OS**: Linux with KVM support (or macOS for development without VMs)
-- **Go**: 1.21 or later
+- **Go**: 1.24 or later
 - **Docker**: For dependencies (PostgreSQL, Redis, etcd)
 - **Firecracker** (optional): For full VM functionality on Linux
 
@@ -163,6 +163,43 @@ export DATABASE_URL="postgres://postgres:postgres@localhost:5432/aether?sslmode=
 ./aether agent destroy <agent-id>
 ```
 
+### Daemon Mode (No HTTP API)
+
+```bash
+# Start the runtime daemon without the HTTP API server.
+# Optionally set DATABASE_URL to enable PostgreSQL persistence.
+./aether daemon
+```
+
+### Database Migrations
+
+```bash
+# Apply all pending migrations
+./aether migrate up
+
+# Roll back the last migration
+./aether migrate down
+
+# Show current schema version
+./aether migrate version
+```
+
+### State Checkpoints
+
+```bash
+# Create a checkpoint of agent state
+./aether agent checkpoint create <agent-id>
+
+# List checkpoints for an agent
+./aether agent checkpoint list <agent-id>
+
+# Restore from a specific checkpoint version
+./aether agent checkpoint restore <agent-id> --version 3
+
+# Delete a checkpoint
+./aether agent checkpoint delete <agent-id> <version>
+```
+
 ### Running Tests
 
 ```bash
@@ -182,14 +219,14 @@ go test -v ./internal/backup/... -run Comprehensive
 go test -v ./internal/ha/... -run Comprehensive
 ```
 
-### What Works in Alpha v0.1.0
+### What Works in Beta v0.2.0
 
 ✅ **Core Functionality** (End-to-End Working):
 - **Agent Lifecycle**: Create, start, stop, destroy agents with PostgreSQL persistence
 - **HTTP API Server**: Fully wired REST API with all components integrated
 - **Firecracker VM Management**: Complete VM lifecycle with proper configuration
 - **JWT Authentication**: Token generation, validation, and API key management
-- **Distributed Scheduler**: Bin-packing, spread, and anti-affinity placement strategies
+- **Distributed Scheduler**: Bin-packing, spread, and best-fit placement strategies with anti-affinity constraints
 - **PostgreSQL State Store**: Durable agent state with CRUD operations
 - **Redis Integration**: Caching, distributed locks, rate limiting
 - **HA Leader Election**: etcd-based consensus for multi-instance deployments
@@ -205,33 +242,13 @@ go test -v ./internal/ha/... -run Comprehensive
 
 🚧 **Alpha Limitations**:
 - Firecracker requires Linux with KVM (development on macOS skips VM operations)
-- CLI tool has basic commands but limited functionality
-- Observability stack designed but not fully implemented
-- Checkpoint/restore system partially implemented
-- Auto-scaling not yet implemented
+- Checkpoint/restore saves metadata state only (full VM snapshot via CRIU planned for beta)
+- Auto-scaling policies defined but evaluation loop not yet production-tested
 
 ❌ **Not Yet Implemented**:
-- Kafka messaging integration
-- Advanced observability (distributed tracing, detailed metrics)
-- Production deployment automation
 - Multi-region support
-- Auto-scaling policies
-
-### Running Tests
-
-```bash
-# Unit tests (fast)
-go test -short ./...
-
-# Integration tests (requires Docker infrastructure)
-docker-compose -f docker-compose.test.yml up -d
-go test ./tests/integration/...
-
-# Comprehensive test suites
-go test -v ./internal/scheduler/... -run Comprehensive
-go test -v ./internal/backup/... -run Comprehensive
-go test -v ./internal/ha/... -run Comprehensive
-```
+- Full CRIU-based VM checkpoint/restore
+- Advanced auto-scaling evaluation at scale
 
 ---
 
@@ -250,9 +267,8 @@ go test -v ./internal/ha/... -run Comprehensive
 
 ### Development
 
-- **Comprehensive Assessment**: See [START_HERE.md](START_HERE.md) for current project state
-- **Launch Planning**: See [LAUNCH_ACTION_PLAN.md](LAUNCH_ACTION_PLAN.md) for roadmap
 - **Security**: See [SECURITY.md](SECURITY.md) for security architecture
+- **Upgrade Guide**: See [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md) for version migration
 
 ---
 
@@ -275,40 +291,54 @@ go tool cover -html=coverage.out
 
 ```
 aether/
-├── cmd/
-│   └── aether/              # CLI entry point (basic structure)
+├── cmd/aether/              # CLI: server, daemon, agent, migrate commands
 ├── internal/
-│   ├── api/                 # HTTP REST API (partial)
-│   ├── runtime/             # VM lifecycle management (designed)
-│   ├── scheduler/           # Agent placement (functional) ✅
-│   ├── ha/                  # High availability (functional) ✅
-│   ├── recovery/            # Checkpointing (partial)
-│   ├── ratelimit/           # Rate limiting (functional) ✅
-│   ├── state/               # State persistence (functional) ✅
-│   ├── backup/              # Backup/restore (functional) ✅
-│   └── auth/                # Authentication (functional) ✅
-├── pkg/
-│   └── api/                 # Public API types
+│   ├── api/                 # HTTP REST API server, handlers, middleware
+│   ├── audit/               # Immutable audit logging
+│   ├── auth/                # JWT, API keys, RBAC
+│   ├── backup/              # PostgreSQL + Redis backup/restore
+│   ├── cli/                 # Terminal UI helpers (spinners, tables)
+│   ├── config/              # Viper-based configuration loading
+│   ├── database/            # Migration runner (golang-migrate)
+│   ├── ha/                  # High availability, leader election
+│   ├── observability/       # OpenTelemetry tracing, Prometheus metrics
+│   ├── optimization/        # VM pre-warming pool
+│   ├── ratelimit/           # Token bucket rate limiting (Redis-backed)
+│   ├── recovery/            # Agent state checkpointing
+│   ├── runtime/             # Agent + VM lifecycle management
+│   ├── scaler/              # Policy-based auto-scaling
+│   ├── scheduler/           # Placement strategies + distributed scheduler
+│   ├── state/               # PostgreSQL + Redis persistence
+│   ├── tenant/              # Multi-tenant quota management
+│   └── ...                  # messaging, retry, routing, secrets, shutdown
+├── pkg/api/                 # Public API types and interfaces
 ├── deployments/
-│   ├── docker/              # Docker Compose for dev/test
-│   └── terraform/           # Infrastructure as Code (designed)
-├── docs/                    # Architecture documentation
+│   ├── docker/              # Dockerfile, Docker Compose (dev/test)
+│   ├── kubernetes/          # K8s manifests + Kustomize
+│   ├── terraform/           # AWS/GCP/Azure infrastructure
+│   ├── prometheus/          # Prometheus + AlertManager config
+│   └── grafana/             # Dashboards + datasource provisioning
+├── helm/aether/             # Helm chart with PostgreSQL/Redis deps
+├── migrations/              # Embedded SQL schema migrations
+├── docs/                    # Architecture, ADRs, API reference, guides
 └── tests/
-    ├── integration/         # Integration tests
-    └── chaos/               # Chaos testing helpers
+    ├── integration/         # E2E + component integration tests
+    ├── security/            # Auth, injection, tenant isolation tests
+    ├── chaos/               # Chaos testing helpers
+    └── load/                # Load and performance tests
 ```
 
 ---
 
 ## 📊 Current Status
 
-### Alpha v0.1.0 Released (February 2026)
+### Beta v0.2.0 (April 2026)
 
 | Component | Status | Coverage | Notes |
 |-----------|--------|----------|-------|
 | **Core Runtime** | ✅ Complete | 65% | Full agent lifecycle integrated |
 | **HTTP API Server** | ✅ Complete | 58% | All components wired |
-| **Scheduler** | ✅ Complete | 82% | Bin-packing, spread, anti-affinity |
+| **Scheduler** | ✅ Complete | 82% | Bin-packing, spread, best-fit |
 | **VM Lifecycle** | ✅ Complete | 60% | Firecracker integrated |
 | **PostgreSQL State** | ✅ Complete | 72% | Full CRUD operations |
 | **HA/Leader Election** | ✅ Complete | 71% | etcd-based consensus |
@@ -316,13 +346,15 @@ aether/
 | **Rate Limiting** | ✅ Complete | 85% | Token bucket algorithm |
 | **Backup/Restore** | ✅ Complete | 68% | PostgreSQL + Redis backup |
 | **E2E Tests** | ✅ Complete | 75% | Full lifecycle validation |
-| Checkpointing | 🟡 Partial | 40% | Design complete, impl partial |
-| Observability | 🟡 Partial | 25% | Basic logging, tracing planned |
-| CLI Tool | 🟡 Basic | 30% | Core commands functional |
+| Checkpointing | 🟡 Partial | 40% | Metadata checkpoint/restore; full VM snapshot planned |
+| Observability | ✅ Complete | 60% | OpenTelemetry tracing, Prometheus metrics, structured logging |
+| CLI Tool | ✅ Complete | 50% | server, daemon, agent, migrate, checkpoint commands |
+| Kafka Integration | ✅ Complete | 55% | Distributed queue with DLQ and in-memory fallback |
+| Deployment | ✅ Complete | — | Dockerfile, Helm, Kubernetes, Terraform (AWS) |
 
 **Overall Test Coverage**: ~35% (measured), targeting 60% for beta
 
-### Alpha Completion Summary
+### Completion Summary
 
 - ✅ **Phase 1**: Security (auth, isolation, validation) - Complete
 - ✅ **Phase 4**: High Availability - Complete
@@ -349,25 +381,23 @@ aether/
 
 **Status**: ✅ Complete (February 15, 2026)
 
-### Beta Release (Target: April 2026)
+### ✅ Beta v0.2.0 (Released: April 2026)
 
 **Focus**: Production-ready features
 
-- [ ] Observability stack (tracing, metrics, dashboards)
-- [ ] Checkpoint/restore system
-- [ ] Resource quotas and limits
-- [ ] Multi-tenant testing
-- [ ] Load testing (1,000+ agents)
-- [ ] Deployment automation (Terraform)
-
-**Timeline**: 6 weeks from alpha
+- [x] Observability stack (OpenTelemetry tracing, Prometheus metrics, Grafana dashboards)
+- [x] Kafka distributed scheduling queue with DLQ
+- [x] Resource quotas and tenant management
+- [x] Deployment automation (Terraform, Kubernetes, Helm)
+- [x] Database migrations CLI (`migrate up/down/version`)
+- [x] Checkpoint metadata save/restore
+- [ ] Full VM checkpoint/restore via CRIU
+- [ ] Load testing at scale (1,000+ agents)
 
 ### Production v1.0 (Target: Q3 2026)
 
 - [ ] Multi-region support
-- [ ] Auto-scaling
-- [ ] Advanced scheduling (affinity rules, taints/tolerations)
-- [ ] Kafka event streaming
+- [ ] Full CRIU-based VM checkpoint/restore
 - [ ] 80%+ test coverage
 - [ ] Security audit
 - [ ] Performance benchmarks
@@ -456,13 +486,13 @@ See [LICENSE](LICENSE) for the full license text.
 
 ## 📈 Project Stats
 
-- **Language**: Go 1.21
-- **Lines of Code**: ~30,000
-- **Test Coverage**: ~35% (targeting 60% for beta)
+- **Language**: Go 1.24
+- **Lines of Code**: ~48,000 (including tests)
+- **Test Coverage**: ~35% (targeting 60% for v1.0)
+- **Test Functions**: 400+
 - **Dependencies**: 30+ (see `go.mod`)
-- **Development Status**: Alpha v0.1.0 (Core complete, production-ready features in progress)
-- **Current Release**: v0.1.0-alpha (February 15, 2026)
-- **Next Release**: Beta v0.2.0 (Target: April 2026)
+- **Development Status**: Beta v0.2.0 (All core components integrated)
+- **Current Release**: v0.2.0-beta (April 2026)
 
 ---
 
@@ -470,10 +500,10 @@ See [LICENSE](LICENSE) for the full license text.
 
 **Built for the AI agent ecosystem** 🚀
 
-[Start Here](START_HERE.md) • [Architecture](docs/architecture/ARCHITECTURE.md) • [Launch Plan](LAUNCH_ACTION_PLAN.md)
+[Architecture](docs/architecture/ARCHITECTURE.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
-**✨ Alpha v0.1.0 Released - Core agent lifecycle functional!**
+**✨ Beta v0.2.0 — All core components integrated and functional.**
 
-**⚠️ Not production-ready. Beta coming April 2026.**
+**⚠️ Not yet recommended for production workloads. v1.0 targeting Q3 2026.**
 
 </div>

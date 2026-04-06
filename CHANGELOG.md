@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance tuning with workload profiles
 
 #### Phase 7: Test Coverage & Documentation
-- Comprehensive test suite (75% coverage)
+- Comprehensive test suite (400+ test functions)
 - VM lifecycle tests (3.3% → 80%)
 - Scheduler tests (63.6% → 85%)
 - Rate limiter tests (9.2% → 80%)
@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Aether is now production-ready! This release includes:
 
 - **Complete feature set** across all 6 implementation phases
-- **75% test coverage** with comprehensive integration tests
+- **400+ test functions** with comprehensive integration, security, and load tests
 - **World-class documentation** including API reference, architecture docs, deployment guides, and operational runbooks
 - **Production-grade security** with multi-tenancy, authentication, and defense in depth
 - **High availability** with multi-AZ deployment and automatic failover
@@ -115,5 +115,6 @@ Aether is now production-ready! This release includes:
 
 - **0.1.0** - 2026-02-10 - Initial open source release
 
-[Unreleased]: https://github.com/yourusername/aether/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/yourusername/aether/releases/tag/v0.1.0
+[Unreleased]: https://github.com/dnakitare/aether/compare/v0.2.0-beta...HEAD
+[0.2.0-beta]: https://github.com/dnakitare/aether/releases/tag/v0.2.0-beta
+[0.1.0]: https://github.com/dnakitare/aether/releases/tag/v0.1.0

@@ -1,8 +1,8 @@
 # Aether Architecture
 
-**Version:** 1.0
-**Last Updated:** 2026-02-10
-**Status:** Production Ready
+**Version:** 0.2.0-beta
+**Last Updated:** 2026-04-05
+**Status:** Beta
 
 ---
 
@@ -882,10 +882,10 @@ All operations are idempotent:
 
 | Component | Language | Framework/Library |
 |-----------|----------|-------------------|
-| API Server | Go 1.21 | gorilla/mux, net/http |
-| Scheduler | Go 1.21 | etcd client, Kafka client |
-| Runtime | Go 1.21 | os/exec, slog |
-| CLI | Go 1.21 | cobra |
+| API Server | Go 1.24 | gorilla/mux, net/http |
+| Scheduler | Go 1.24 | etcd client, Kafka client |
+| Runtime | Go 1.24 | os/exec, slog |
+| CLI | Go 1.24 | cobra |
 
 ### Data Stores
 

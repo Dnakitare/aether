@@ -1,7 +1,7 @@
 # Getting Started - Local Development
 
 **Last Updated:** 2026-02-15
-**Status:** Pre-Alpha
+**Status:** Beta v0.2.0
 
 This guide helps you set up Aether for local development and testing.
 
@@ -25,7 +25,7 @@ This guide helps you set up Aether for local development and testing.
 
 ### Required
 
-- **Go 1.21+** - [Install Go](https://go.dev/doc/install)
+- **Go 1.24+** - [Install Go](https://go.dev/doc/install)
 - **Docker & Docker Compose** - [Install Docker](https://docs.docker.com/get-docker/)
 - **Git** - For cloning the repository
 - **8GB RAM** minimum (16GB recommended)
@@ -41,7 +41,7 @@ This guide helps you set up Aether for local development and testing.
 
 ```bash
 # Verify Go version
-go version  # Should be 1.21 or higher
+go version  # Should be 1.24 or higher
 
 # Verify Docker
 docker --version
@@ -440,7 +440,7 @@ go tool cover -func=coverage.out | grep total
    - Check `pkg/api/types.go` for core data structures
 
 3. **Pick a task:**
-   - See [LAUNCH_ACTION_PLAN.md](../LAUNCH_ACTION_PLAN.md) for roadmap
+   - See [LAUNCH_ACTION_PLAN.md](../docs/archive/LAUNCH_ACTION_PLAN.md) for roadmap
    - Good first issues: Wire API endpoints, add tests, improve docs
 
 ### For Production Deployment
@@ -461,8 +461,8 @@ See [PRODUCTION_DEPLOYMENT.md](deployment/PRODUCTION_DEPLOYMENT.md) for future p
 - **Architecture:** [docs/architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md)
 - **API Reference:** [docs/api/API_REFERENCE.md](api/API_REFERENCE.md)
 - **Contributing:** [CONTRIBUTING.md](../CONTRIBUTING.md)
-- **Project Status:** [START_HERE.md](../START_HERE.md)
-- **Launch Plan:** [LAUNCH_ACTION_PLAN.md](../LAUNCH_ACTION_PLAN.md)
+- **Project Status:** [START_HERE.md](../docs/archive/START_HERE.md)
+- **Launch Plan:** [LAUNCH_ACTION_PLAN.md](../docs/archive/LAUNCH_ACTION_PLAN.md)
 
 ---
 

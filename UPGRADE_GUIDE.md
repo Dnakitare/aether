@@ -21,7 +21,7 @@ Beta v0.2.0 is **backward compatible** with Alpha v0.1.0. The upgrade process is
 ## Pre-Upgrade Checklist
 
 - [ ] Backup your database
-- [ ] Review [BETA_RELEASE_NOTES.md](BETA_RELEASE_NOTES.md)
+- [ ] Review [Beta Release Notes](docs/archive/BETA_RELEASE_NOTES.md)
 - [ ] Check current version: `aether version`
 - [ ] Note your current configuration
 - [ ] Plan maintenance window (optional)
@@ -56,7 +56,7 @@ cp /etc/aether/config.yaml /etc/aether/config.yaml.alpha
 
 ```bash
 # Pull Beta image
-docker pull ghcr.io/aether-runtime/aether:0.2.0-beta
+docker pull ghcr.io/dnakitare/aether:0.2.0-beta
 
 # Or build locally
 git checkout beta/v0.2.0
@@ -69,7 +69,7 @@ docker build -t aether:0.2.0-beta .
 # Update image version
 services:
   aether:
-    image: ghcr.io/aether-runtime/aether:0.2.0-beta
+    image: ghcr.io/dnakitare/aether:0.2.0-beta
     # ... rest of config
 ```
 
@@ -93,14 +93,14 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./deployments/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
 
   grafana:
     image: grafana/grafana:10.2.2
     ports:
       - "3000:3000"
     volumes:
-      - ./deployments/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./deployments/grafana/dashboards:/etc/grafana/provisioning/dashboards
 ```
 
 #### 4. Update Environment Variables
@@ -148,7 +148,7 @@ kubectl get secret -n aether -o yaml > aether-alpha-secrets.yaml
 
 ```bash
 # Clone repository
-git clone https://github.com/aether-runtime/aether.git
+git clone https://github.com/dnakitare/aether.git
 cd aether
 git checkout beta/v0.2.0
 
@@ -166,7 +166,7 @@ helm upgrade aether ./helm/aether \
 ```bash
 # Update image in deployment
 kubectl set image deployment/aether \
-  aether=ghcr.io/aether-runtime/aether:0.2.0-beta \
+  aether=ghcr.io/dnakitare/aether:0.2.0-beta \
   -n aether
 
 # Watch rollout
@@ -187,7 +187,7 @@ helm install prometheus prometheus-community/kube-prometheus-stack \
   --create-namespace
 
 # Configure ServiceMonitor for Aether
-kubectl apply -f deployments/monitoring/servicemonitor.yaml
+kubectl apply -f helm/aether/templates/servicemonitor.yaml
 ```
 
 ### Option 3: Binary/Source Deployment
@@ -196,12 +196,12 @@ kubectl apply -f deployments/monitoring/servicemonitor.yaml
 
 ```bash
 # Download binary
-wget https://github.com/aether-runtime/aether/releases/download/v0.2.0-beta/aether-linux-amd64
+wget https://github.com/dnakitare/aether/releases/download/v0.2.0-beta/aether-linux-amd64
 chmod +x aether-linux-amd64
 mv aether-linux-amd64 /usr/local/bin/aether
 
 # Or build from source
-git clone https://github.com/aether-runtime/aether.git
+git clone https://github.com/dnakitare/aether.git
 cd aether
 git checkout beta/v0.2.0
 make build
@@ -340,7 +340,7 @@ docker-compose down
 
 # Restore Alpha image
 docker-compose.yml:
-  image: ghcr.io/aether-runtime/aether:0.1.0
+  image: ghcr.io/dnakitare/aether:0.1.0
 
 # Start Alpha
 docker-compose up -d
@@ -423,7 +423,7 @@ docker-compose.yml:
 
 ```bash
 # Import Grafana dashboards
-cd deployments/monitoring/grafana/dashboards
+cd deployments/grafana/dashboards
 for dashboard in *.json; do
   curl -X POST http://admin:admin@localhost:3000/api/dashboards/db \
     -H "Content-Type: application/json" \
@@ -435,7 +435,7 @@ done
 
 ```bash
 # Configure Prometheus alerts
-cp deployments/monitoring/prometheus-alerts.yml /etc/prometheus/
+cp deployments/prometheus/alerts.yml /etc/prometheus/
 # Reload Prometheus config
 curl -X POST http://localhost:9090/-/reload
 ```
@@ -516,7 +516,7 @@ curl -X DELETE http://localhost:8080/agents/bulk \
 If you encounter issues during upgrade:
 
 1. Check [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)
-2. Review [GitHub Issues](https://github.com/aether-runtime/aether/issues)
+2. Review [GitHub Issues](https://github.com/dnakitare/aether/issues)
 3. Ask on [Discord](https://discord.gg/aether)
 4. Create new issue with upgrade details
 
@@ -527,7 +527,7 @@ We'd love to hear about your upgrade experience:
 - What was challenging?
 - Feature requests?
 
-Share feedback: https://github.com/aether-runtime/aether/discussions
+Share feedback: https://github.com/dnakitare/aether/discussions
 
 ---
 

@@ -323,8 +323,8 @@ func (s *Server) loginRateLimiter(next http.Handler) http.Handler {
 
 ### Token Expiry (Security vs UX)
 
-**Choice**: 1 hour expiry with refresh tokens (future)
-**Rationale**: 1 hour limits theft impact while avoiding annoying re-logins. Refresh tokens enable longer sessions.
+**Choice**: Configurable expiry (default 24 hours; originally proposed 1 hour)
+**Rationale**: The 1-hour default was relaxed to 24 hours during beta to simplify development and testing. Production deployments should configure shorter expiry via `token_duration` in config. Refresh tokens are planned for v1.0.
 
 ### HS256 vs RS256
 

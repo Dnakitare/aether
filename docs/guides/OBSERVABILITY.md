@@ -348,7 +348,7 @@ open "http://localhost:16686/trace/$TRACE_ID"
 
 ### Grafana Dashboards
 
-Aether includes pre-built Grafana dashboards in `deployments/monitoring/grafana/dashboards/`:
+Aether includes pre-built Grafana dashboards in `deployments/grafana/dashboards/`:
 
 1. **System Overview** (`system-overview.json`)
    - Request rate and latency
@@ -374,7 +374,7 @@ Aether includes pre-built Grafana dashboards in `deployments/monitoring/grafana/
 
 ```bash
 # Using Grafana API
-for dashboard in deployments/monitoring/grafana/dashboards/*.json; do
+for dashboard in deployments/grafana/dashboards/*.json; do
   curl -X POST http://admin:admin@localhost:3000/api/dashboards/db \
     -H "Content-Type: application/json" \
     -d @"$dashboard"
@@ -578,7 +578,7 @@ kubectl logs -n aether deployment/aether-api | \
 
 ## Next Steps
 
-- Set up [Alerting](./ALERTING.md)
+- Set up alerting via [AlertManager configuration](../../deployments/prometheus/alertmanager.yml)
 - Review [Troubleshooting Guide](./TROUBLESHOOTING.md)
 - Configure [Performance Tuning](./PERFORMANCE.md)
 
