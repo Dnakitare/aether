@@ -1,9 +1,0 @@
-Test: TestLoad_1000Agents
-Date: Sun Feb 15 16:08:29 MST 2026
-Git Commit: b6f6af8
-Branch: beta/v0.2.0
-Go Version: go version go1.24.12 darwin/arm64
-OS: Darwin
-Arch: arm64
-Profiles: CPU=true MEM=true BLOCK=false MUTEX=false
-Success: true
