@@ -106,24 +106,37 @@ func (ps *PostgresStore) UpsertTenant(ctx context.Context, tenantID api.TenantID
 }
 
 // CreateAgent creates a new agent record in the database.
+// The tenant upsert and agent insert are wrapped in a single transaction
+// to prevent orphaned tenant records on insert failure.
 func (ps *PostgresStore) CreateAgent(ctx context.Context, config api.AgentConfig) error {
-	// Ensure the tenant row exists before inserting the agent (FK constraint).
-	if err := ps.UpsertTenant(ctx, config.TenantID); err != nil {
-		return err
-	}
-
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent config: %w", err)
 	}
 
-	query := `
+	tx, err := ps.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op after Commit
+
+	// Ensure the tenant row exists (FK constraint).
+	upsertQuery := `
+		INSERT INTO tenants (id, name, tier, created_at, updated_at)
+		VALUES ($1, $1, 'free', NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING
+	`
+	if _, err := tx.ExecContext(ctx, upsertQuery, config.TenantID); err != nil {
+		return fmt.Errorf("failed to upsert tenant: %w", err)
+	}
+
+	insertQuery := `
 		INSERT INTO agents (id, tenant_id, name, image, status, config, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 
 	now := time.Now()
-	_, err = ps.db.ExecContext(ctx, query,
+	if _, err := tx.ExecContext(ctx, insertQuery,
 		config.ID,
 		config.TenantID,
 		config.Name,
@@ -132,10 +145,12 @@ func (ps *PostgresStore) CreateAgent(ctx context.Context, config api.AgentConfig
 		configJSON,
 		now,
 		now,
-	)
-
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit agent creation: %w", err)
 	}
 
 	ps.logger.InfoContext(ctx, "agent created in database",

@@ -438,6 +438,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	apiSrv := apiserver.New(logger, apiConfig, rt, sched, sc, quotaManager, jwtManager)
+
+	// Wire metrics into the runtime so agent create/destroy/error operations
+	// are recorded as Prometheus counters.
+	rt.SetMetrics(apiSrv.Metrics())
+
 	if auditLogger != nil {
 		apiSrv.WithAuditLogger(auditLogger)
 	}

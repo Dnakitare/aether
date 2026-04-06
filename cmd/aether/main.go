@@ -14,6 +14,7 @@ import (
 	"github.com/dnakitare/aether/internal/observability"
 	"github.com/dnakitare/aether/internal/runtime"
 	"github.com/dnakitare/aether/internal/runtime/vm"
+	"github.com/dnakitare/aether/internal/state"
 	"github.com/dnakitare/aether/pkg/api"
 	"github.com/spf13/cobra"
 )
@@ -200,9 +201,23 @@ var daemonCmd = &cobra.Command{
 			WorkspaceDir: "/var/lib/aether",
 		}
 
-		// Create runtime (without state store for simple daemon mode)
+		// Optionally wire PostgreSQL when DATABASE_URL is set.
+		var stateStore runtime.StateStore
+		if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+			spinner.UpdateMessage("Connecting to PostgreSQL...")
+			pgStore, pgErr := state.NewPostgresStore(logger, state.PostgresConfig{DSN: dsn})
+			if pgErr != nil {
+				spinner.Error("Failed to connect to PostgreSQL")
+				cli.ErrorWithHelp(pgErr, "Check DATABASE_URL and ensure PostgreSQL is reachable")
+				return pgErr
+			}
+			defer pgStore.Close()
+			stateStore = pgStore
+			logger.InfoContext(ctx, "daemon using PostgreSQL state store")
+		}
+
 		var err error
-		rt, err = runtime.New(logger, config, nil)
+		rt, err = runtime.New(logger, config, stateStore)
 		if err != nil {
 			spinner.Error("Failed to initialize runtime")
 			cli.ErrorWithHelp(err, "Check if Firecracker is installed and configured")

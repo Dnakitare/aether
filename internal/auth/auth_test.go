@@ -10,7 +10,7 @@ import (
 
 func TestJWTManager(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}
@@ -51,7 +51,7 @@ func TestJWTManager(t *testing.T) {
 
 func TestInvalidToken(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}

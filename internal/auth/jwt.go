@@ -90,6 +90,9 @@ func NewJWTManager(config Config) (*JWTManager, error) {
 	if config.SecretKey == "" {
 		return nil, fmt.Errorf("secret key is required when RSA key paths are not set")
 	}
+	if len(config.SecretKey) < 32 {
+		return nil, fmt.Errorf("secret key must be at least 32 characters for HS256 signing security")
+	}
 	m.secretKey = []byte(config.SecretKey)
 	return m, nil
 }

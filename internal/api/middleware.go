@@ -40,8 +40,10 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
 		// Increment in-flight requests metric
-		s.metrics.IncAPIRequestsInFlight(r.Method, r.URL.Path)
-		defer s.metrics.DecAPIRequestsInFlight(r.Method, r.URL.Path)
+		if s.metrics != nil {
+			s.metrics.IncAPIRequestsInFlight(r.Method, r.URL.Path)
+			defer s.metrics.DecAPIRequestsInFlight(r.Method, r.URL.Path)
+		}
 
 		next.ServeHTTP(wrapped, r)
 
@@ -56,13 +58,15 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		requestID, _ := r.Context().Value(requestIDKey{}).(string)
 
 		// Record metrics
-		s.metrics.RecordAPIRequest(
-			r.Method,
-			r.URL.Path,
-			http.StatusText(wrapped.statusCode),
-			tenantID,
-			duration,
-		)
+		if s.metrics != nil {
+			s.metrics.RecordAPIRequest(
+				r.Method,
+				r.URL.Path,
+				http.StatusText(wrapped.statusCode),
+				tenantID,
+				duration,
+			)
+		}
 
 		s.logger.InfoContext(r.Context(),
 			"http request",
@@ -238,10 +242,15 @@ type requestIDKey struct{}
 // responseWriter wraps http.ResponseWriter to capture status code.
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int
+	statusCode  int
+	wroteHeader bool
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
+	if rw.wroteHeader {
+		return
+	}
+	rw.wroteHeader = true
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }

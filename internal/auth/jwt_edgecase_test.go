@@ -31,7 +31,7 @@ import (
 func TestJWTExpiration_ExactBoundary(t *testing.T) {
 	t.Run("token expires at exact second", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Second,
 			Issuer:        "aether-test",
 		}
@@ -59,7 +59,7 @@ func TestJWTExpiration_ExactBoundary(t *testing.T) {
 
 	t.Run("token with very short lifetime", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 500 * time.Millisecond,
 			Issuer:        "aether-test",
 		}
@@ -79,7 +79,7 @@ func TestJWTExpiration_ExactBoundary(t *testing.T) {
 
 	t.Run("token at issuance time", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "aether-test",
 		}
@@ -104,7 +104,7 @@ func TestJWTExpiration_ExactBoundary(t *testing.T) {
 func TestJWTClockSkew_FutureToken(t *testing.T) {
 	t.Run("token not yet valid", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "aether-test",
 		}
@@ -141,7 +141,7 @@ func TestJWTClockSkew_FutureToken(t *testing.T) {
 
 	t.Run("token issued in future", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "aether-test",
 		}
@@ -182,7 +182,7 @@ func TestJWTClockSkew_FutureToken(t *testing.T) {
 
 func TestJWTInvalidFormats(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}
@@ -246,7 +246,7 @@ func TestJWTInvalidFormats(t *testing.T) {
 
 func TestJWTSignatureTampering(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}
@@ -257,7 +257,7 @@ func TestJWTSignatureTampering(t *testing.T) {
 	t.Run("valid token signed with wrong key", func(t *testing.T) {
 		// Create token with different secret
 		wrongConfig := auth.Config{
-			SecretKey:     "wrong-secret-key-67890",
+			SecretKey:     "wrong-secret-key-that-is-at-least-32-chars-xx",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "aether-test",
 		}
@@ -326,7 +326,7 @@ func TestJWTSignatureTampering(t *testing.T) {
 
 func TestJWTConcurrentValidation(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}
@@ -394,7 +394,7 @@ func TestJWTConcurrentValidation(t *testing.T) {
 
 func TestJWTContextPropagation(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}
@@ -480,7 +480,7 @@ func TestJWTContextPropagation(t *testing.T) {
 
 func TestJWTReplayAttackScenarios(t *testing.T) {
 	config := auth.Config{
-		SecretKey:     "test-secret-key-12345",
+		SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 		TokenDuration: 1 * time.Hour,
 		Issuer:        "aether-test",
 	}
@@ -529,7 +529,7 @@ func TestJWTReplayAttackScenarios(t *testing.T) {
 
 		// Create third manager with different secret
 		wrongConfig := config
-		wrongConfig.SecretKey = "different-secret"
+		wrongConfig.SecretKey = "different-secret-that-is-at-least-32-chars-long"
 
 		manager3, err := auth.NewJWTManager(wrongConfig)
 		require.NoError(t, err)
@@ -559,7 +559,7 @@ func TestJWTEmptyValues(t *testing.T) {
 
 	t.Run("empty tenant id", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "aether-test",
 		}
@@ -579,7 +579,7 @@ func TestJWTEmptyValues(t *testing.T) {
 
 	t.Run("empty user id", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "aether-test",
 		}
@@ -598,7 +598,7 @@ func TestJWTEmptyValues(t *testing.T) {
 
 	t.Run("default values when not specified", func(t *testing.T) {
 		config := auth.Config{
-			SecretKey: "test-secret-key-12345",
+			SecretKey: "test-secret-key-that-is-at-least-32-chars-long",
 			// TokenDuration and Issuer not specified
 		}
 
@@ -625,7 +625,7 @@ func TestJWTIssuerValidation(t *testing.T) {
 	t.Run("token from different issuer", func(t *testing.T) {
 		// Create token with issuer "issuer-a"
 		configA := auth.Config{
-			SecretKey:     "test-secret-key-12345",
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long",
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "issuer-a",
 		}
@@ -638,7 +638,7 @@ func TestJWTIssuerValidation(t *testing.T) {
 
 		// Validate with manager expecting "issuer-b"
 		configB := auth.Config{
-			SecretKey:     "test-secret-key-12345", // Same secret
+			SecretKey:     "test-secret-key-that-is-at-least-32-chars-long", // Same secret
 			TokenDuration: 1 * time.Hour,
 			Issuer:        "issuer-b", // Different issuer
 		}

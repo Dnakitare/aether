@@ -192,6 +192,11 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		s.scheduler.RecordAllocation(ctx, req.ID, req.TenantID, scheduler.FromAgentConfig(req))
 	}
 
+	// Record business metric for agent creation.
+	if s.metrics != nil {
+		s.metrics.RecordAgentOperation("create", "success", req.TenantID)
+	}
+
 	// Get agent info
 	info, err := s.runtime.GetAgent(ctx, req.ID)
 	if err != nil {
@@ -314,6 +319,10 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 
 	if s.scheduler != nil {
 		s.scheduler.UnscheduleAgent(ctx, agentID)
+	}
+
+	if s.metrics != nil {
+		s.metrics.RecordAgentOperation("delete", "success", info.Config.TenantID)
 	}
 
 	s.respondJSON(w, http.StatusNoContent, nil)
@@ -817,6 +826,13 @@ func (s *Server) handleGetPolicy(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	name := vars["name"]
 
+	if err := ValidateAgentName(name); err != nil {
+		s.respondValidationError(w, "Invalid policy name", []FieldError{
+			{Field: "name", Message: "must be 1-64 alphanumeric characters, hyphens, or underscores", Code: "INVALID_NAME"},
+		})
+		return
+	}
+
 	policy, exists := s.scaler.GetPolicy(name)
 	if !exists {
 		s.respondNotFound(w, "Policy", name)
@@ -845,6 +861,13 @@ func (s *Server) handleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 
 	vars := mux.Vars(r)
 	name := vars["name"]
+
+	if err := ValidateAgentName(name); err != nil {
+		s.respondValidationError(w, "Invalid policy name", []FieldError{
+			{Field: "name", Message: "must be 1-64 alphanumeric characters, hyphens, or underscores", Code: "INVALID_NAME"},
+		})
+		return
+	}
 
 	s.scaler.RemovePolicy(name)
 	s.respondJSON(w, http.StatusNoContent, nil)

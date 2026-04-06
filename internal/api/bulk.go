@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/dnakitare/aether/internal/auth"
+	"github.com/dnakitare/aether/internal/scheduler"
 	"github.com/dnakitare/aether/internal/tenant"
 	"github.com/dnakitare/aether/pkg/api"
 )
@@ -200,9 +201,20 @@ func (s *Server) bulkCreateAgents(ctx context.Context, tenantID api.TenantID, co
 					s.logger.WarnContext(ctx, "failed to destroy agent after bulk start failure",
 						"agent_id", cfg.ID, "error", derr)
 				}
+				if s.scheduler != nil {
+					s.scheduler.UnscheduleAgent(ctx, cfg.ID)
+				}
 				result.Error = fmt.Sprintf("start failed: %v", err)
 				results[index] = result
 				return
+			}
+
+			// Record scheduler allocation and business metrics.
+			if s.scheduler != nil {
+				s.scheduler.RecordAllocation(ctx, cfg.ID, cfg.TenantID, scheduler.FromAgentConfig(cfg))
+			}
+			if s.metrics != nil {
+				s.metrics.RecordAgentOperation("create", "success", cfg.TenantID)
 			}
 
 			result.Success = true
@@ -350,6 +362,10 @@ func (s *Server) bulkDeleteAgents(ctx context.Context, tenantID api.TenantID, ag
 
 			if s.scheduler != nil {
 				s.scheduler.UnscheduleAgent(ctx, id)
+			}
+
+			if s.metrics != nil {
+				s.metrics.RecordAgentOperation("delete", "success", info.Config.TenantID)
 			}
 
 			result.Success = true
