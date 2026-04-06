@@ -9,6 +9,8 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dnakitare/aether/migrations"
 )
 
 func TestDefaultMigrationConfig(t *testing.T) {
@@ -280,5 +282,134 @@ func TestErrorHandling(t *testing.T) {
 
 		_, _, err = GetVersion(logger, db, config)
 		assert.Error(t, err)
+	})
+}
+
+// openDatabaseURL opens a connection using the DATABASE_URL env var and skips
+// the test if it is not set or the database is unreachable.
+func openDatabaseURL(t *testing.T) *sql.DB {
+	t.Helper()
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+
+	if err := db.Ping(); err != nil {
+		db.Close()
+		t.Skipf("cannot reach database at DATABASE_URL: %v", err)
+	}
+
+	return db
+}
+
+// embeddedFSConfig returns a MigrationConfig that sources migrations from the
+// embedded FS rather than the filesystem.
+func embeddedFSConfig() MigrationConfig {
+	return MigrationConfig{
+		MigrationsFS: migrations.FS,
+		DatabaseName: "aether_test",
+	}
+}
+
+func TestRunMigrations_WithEmbeddedFS(t *testing.T) {
+	db := openDatabaseURL(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	config := embeddedFSConfig()
+
+	t.Run("applies_migrations_successfully", func(t *testing.T) {
+		err := RunMigrations(logger, db, config)
+		require.NoError(t, err)
+
+		version, dirty, err := GetVersion(logger, db, config)
+		require.NoError(t, err)
+		assert.False(t, dirty, "database should not be dirty after migration")
+		assert.Greater(t, version, uint(0), "version should be non-zero after migration")
+	})
+
+	t.Run("idempotent_second_run_succeeds", func(t *testing.T) {
+		// Ensure fully migrated first.
+		require.NoError(t, RunMigrations(logger, db, config))
+
+		// Running again must not return an error.
+		err := RunMigrations(logger, db, config)
+		require.NoError(t, err, "RunMigrations should be idempotent")
+	})
+}
+
+func TestMigrateDown_WithEmbeddedFS(t *testing.T) {
+	db := openDatabaseURL(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	config := embeddedFSConfig()
+
+	t.Run("reduces_version_by_one", func(t *testing.T) {
+		// Bring the schema up to date before rolling back.
+		require.NoError(t, RunMigrations(logger, db, config))
+
+		versionBefore, dirty, err := GetVersion(logger, db, config)
+		require.NoError(t, err)
+		require.False(t, dirty)
+		if versionBefore == 0 {
+			t.Skip("no migrations present to roll back")
+		}
+
+		require.NoError(t, MigrateDown(logger, db, config))
+
+		versionAfter, dirty, err := GetVersion(logger, db, config)
+		require.NoError(t, err)
+		require.False(t, dirty)
+
+		assert.Equal(t, versionBefore-1, versionAfter, "version should decrease by exactly 1 after rollback")
+
+		// Restore state so other tests in the same run are not affected.
+		require.NoError(t, RunMigrations(logger, db, config))
+	})
+}
+
+func TestGetVersion_FreshDatabase(t *testing.T) {
+	db := openDatabaseURL(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Use a unique database name so this test is isolated from migrations
+	// applied by other tests. The schema_migrations table will not exist yet.
+	config := MigrationConfig{
+		MigrationsFS: migrations.FS,
+		DatabaseName: "aether_fresh_version_test",
+	}
+
+	t.Run("returns_zero_before_any_migration", func(t *testing.T) {
+		// Drop and recreate the schema_migrations table to simulate a fresh DB.
+		// golang-migrate stores state in a table named after DatabaseName; use a
+		// dedicated name to avoid touching the real schema.
+		_, _ = db.Exec(`DROP TABLE IF EXISTS schema_migrations`)
+
+		version, dirty, err := GetVersion(logger, db, config)
+		require.NoError(t, err)
+		assert.False(t, dirty)
+		assert.Equal(t, uint(0), version, "version should be 0 for a fresh database")
+	})
+}
+
+func TestRunMigrations_InvalidDSN(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	t.Run("returns_error_for_invalid_dsn", func(t *testing.T) {
+		db, err := sql.Open("postgres", "host=invalid-host-that-does-not-exist port=5432 user=x dbname=x sslmode=disable connect_timeout=1")
+		require.NoError(t, err)
+		defer db.Close()
+
+		config := embeddedFSConfig()
+
+		err = RunMigrations(logger, db, config)
+		assert.Error(t, err, "RunMigrations should return an error when the DSN is unreachable")
 	})
 }
