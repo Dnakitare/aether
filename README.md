@@ -12,7 +12,7 @@ Aether is a runtime for AI agents with secure isolation, intelligent orchestrati
 **Think Docker for AI agents** – but with security and multi-tenancy from day one.
 
 > ⚠️ **Project Status: Beta v0.2.0**
-> Aether has reached beta with all core components integrated: HTTP API, distributed scheduler, PostgreSQL persistence, Kafka messaging, OpenTelemetry observability, and Kubernetes/Terraform deployment. Not yet recommended for production workloads. Targeting v1.0 in Q3 2026.
+> Aether has reached beta with the core control plane integrated: HTTP API, distributed scheduler, PostgreSQL persistence, OpenTelemetry observability, and Kubernetes/Terraform deployment on AWS. Kafka messaging, HashiCorp Vault secrets, and GCE node provisioning are present but **experimental**. Not yet recommended for production workloads. Targeting v1.0 in Q3 2026 — see [docs/V1_SCOPE.md](docs/V1_SCOPE.md) for the v1.0 scope and shipping criteria.
 
 ---
 
@@ -383,24 +383,41 @@ aether/
 
 ### ✅ Beta v0.2.0 (Released: April 2026)
 
-**Focus**: Production-ready features
+**Focus**: Core control plane integrated
 
 - [x] Observability stack (OpenTelemetry tracing, Prometheus metrics, Grafana dashboards)
-- [x] Kafka distributed scheduling queue with DLQ
+- [x] Kafka distributed scheduling queue with DLQ *(experimental — see v1.0 below)*
 - [x] Resource quotas and tenant management
 - [x] Deployment automation (Terraform, Kubernetes, Helm)
 - [x] Database migrations CLI (`migrate up/down/version`)
 - [x] Checkpoint metadata save/restore
-- [ ] Full VM checkpoint/restore via CRIU
-- [ ] Load testing at scale (1,000+ agents)
 
 ### Production v1.0 (Target: Q3 2026)
 
-- [ ] Multi-region support
-- [ ] Full CRIU-based VM checkpoint/restore
-- [ ] 80%+ test coverage
-- [ ] Security audit
-- [ ] Performance benchmarks
+**Focus**: Single-region, hardware-isolated agent runtime — hardened to a defensible release.
+
+The supported v1.0 surface is the integrated control plane that exists today: HTTP API, JWT/RBAC auth, distributed scheduler, PostgreSQL state, Redis quotas, OpenTelemetry observability, and single-cloud (AWS) deployment via Helm + Terraform. See [docs/V1_SCOPE.md](docs/V1_SCOPE.md) for the full scope document.
+
+**Shipping criteria** (each measurable):
+
+- [ ] ≥ 70% test coverage on the in-scope surface (experimental and deferred packages excluded from the denominator)
+- [ ] One external security review pass — auth, multi-tenant isolation, Firecracker boundary; P0/P1 findings closed before ship
+- [ ] 1,000-agent load test on a single AWS region, raw numbers published in `docs/V1_LOAD_TEST.md`
+- [ ] One real external adopter running v1.0-rc on a non-toy workload for ≥ 2 weeks
+
+**Experimental in v1.0** (in repo, opt-in, not part of the supported surface):
+
+- Kafka messaging (in-process queue is the supported default)
+- HashiCorp Vault secrets (env vars / Kubernetes secrets are the supported defaults)
+- GCE node provisioning (EC2 is the only supported provisioner)
+
+**Deferred:**
+
+- Full CRIU-based VM checkpoint/restore → v1.1 (metadata-level lands in v1.0)
+- Azure deployment → v1.1+
+- Multi-region support → v2.0
+
+If the shipping criteria are not met by Q3 2026, the date slips. A v1.0 that means something is more valuable than a v1.0 that ships on schedule.
 
 ---
 
@@ -488,7 +505,7 @@ See [LICENSE](LICENSE) for the full license text.
 
 - **Language**: Go 1.24
 - **Lines of Code**: ~48,000 (including tests)
-- **Test Coverage**: ~35% (targeting 60% for v1.0)
+- **Test Coverage**: ~35% (targeting ≥ 70% on the in-scope v1.0 surface; see [docs/V1_SCOPE.md](docs/V1_SCOPE.md))
 - **Test Functions**: 400+
 - **Dependencies**: 30+ (see `go.mod`)
 - **Development Status**: Beta v0.2.0 (All core components integrated)
