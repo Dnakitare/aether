@@ -2,7 +2,7 @@
 
 **Modern AI Agent Runtime with Hardware-Level Isolation** (Beta v0.2.0)
 
-[![Build Status](https://img.shields.io/github/workflow/status/dnakitare/aether/CI)](https://github.com/dnakitare/aether/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/dnakitare/aether/ci.yml?branch=main)](https://github.com/dnakitare/aether/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.24-blue)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Development Status](https://img.shields.io/badge/status-beta-blue)](https://github.com/dnakitare/aether)
