@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dnakitare/aether/internal/auth"
 	"github.com/dnakitare/aether/pkg/api"
 )
 
@@ -79,11 +80,13 @@ func MiddlewareWithConfig(config MiddlewareConfig) func(http.Handler) http.Handl
 				tier = TierFree
 			}
 
-			// Check rate limits
+			// Check rate limits. Fail OPEN on limiter infrastructure errors
+			// (e.g. Redis down): a rate limiter must not become a single point
+			// of failure that 500s every request. Log and allow instead.
 			result, err := config.Limiter.CheckLimits(ctx, tenantID, userID, r.URL.Path, tier)
 			if err != nil {
-				config.Logger.ErrorContext(ctx, "rate limit check failed", "error", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				config.Logger.ErrorContext(ctx, "rate limit check failed, allowing request (fail-open)", "error", err)
+				next.ServeHTTP(w, r)
 				return
 			}
 
@@ -105,23 +108,20 @@ func MiddlewareWithConfig(config MiddlewareConfig) func(http.Handler) http.Handl
 	}
 }
 
-// extractTenantID extracts tenant ID from request.
+// extractTenantID returns the authenticated tenant ID, or "" if the request is
+// not authenticated. It reads ONLY the validated JWT claims from context and
+// deliberately ignores the client-supplied X-Tenant-ID header: trusting that
+// header let a caller land in an arbitrary bucket (bypassing its own limit) or
+// drain a victim tenant's bucket (targeted DoS).
+//
+// Note: because the rate-limit middleware currently runs before the auth
+// middleware, claims are usually absent here and callers fall back to the
+// client IP. Per-tenant tiered limiting requires applying a second limiter
+// after auth with a real TenantTierProvider (tracked as future work).
 func extractTenantID(r *http.Request) api.TenantID {
-	// Try header first
-	if tenantID := r.Header.Get("X-Tenant-ID"); tenantID != "" {
-		return api.TenantID(tenantID)
+	if tenantID, err := auth.GetTenantID(r.Context()); err == nil {
+		return tenantID
 	}
-
-	// Try from context (set by auth middleware)
-	if tenantID := r.Context().Value("tenant_id"); tenantID != nil {
-		if tid, ok := tenantID.(api.TenantID); ok {
-			return tid
-		}
-		if tid, ok := tenantID.(string); ok {
-			return api.TenantID(tid)
-		}
-	}
-
 	return ""
 }
 
@@ -145,20 +145,13 @@ func extractClientIP(r *http.Request) api.TenantID {
 	return api.TenantID("ip:" + host)
 }
 
-// extractUserID extracts user ID from request.
+// extractUserID returns the authenticated user ID, or "" if unauthenticated.
+// Like extractTenantID it reads only validated claims and ignores the
+// spoofable X-User-ID header.
 func extractUserID(r *http.Request) string {
-	// Try header first
-	if userID := r.Header.Get("X-User-ID"); userID != "" {
+	if userID, err := auth.GetUserID(r.Context()); err == nil {
 		return userID
 	}
-
-	// Try from context (set by auth middleware)
-	if userID := r.Context().Value("user_id"); userID != nil {
-		if uid, ok := userID.(string); ok {
-			return uid
-		}
-	}
-
 	return ""
 }
 

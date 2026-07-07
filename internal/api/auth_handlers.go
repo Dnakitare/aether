@@ -12,6 +12,7 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/dnakitare/aether/internal/auth"
 	"github.com/dnakitare/aether/pkg/api"
 )
 
@@ -127,13 +128,22 @@ func (p *PostgresTokenIssuer) IssueToken(ctx context.Context, apiKey string) (st
 		return "", fmt.Errorf("key has expired")
 	}
 
-	// Derive role from scopes: any admin-level scope → "admin", else "user".
-	role := "user"
+	// Derive the RBAC role from scopes. Order matters: platform authority is
+	// explicit and never implied by tenant-level write scopes. A key with no
+	// recognized scope falls back to viewer (read-only) rather than a role with
+	// no permissions, so it isn't silently locked out.
+	role := string(auth.RoleViewer)
+	scopeSet := make(map[string]bool, len(scopes))
 	for _, s := range scopes {
-		if s == "admin" || s == "quota:write" || s == "scheduler:write" {
-			role = "admin"
-			break
-		}
+		scopeSet[s] = true
+	}
+	switch {
+	case scopeSet["platform:admin"]:
+		role = string(auth.RolePlatformAdmin)
+	case scopeSet["admin"]:
+		role = string(auth.RoleAdmin)
+	case scopeSet["agent:create"] || scopeSet["agent:update"] || scopeSet["agent:delete"]:
+		role = string(auth.RoleDeveloper)
 	}
 
 	// Update last_used_at best-effort; don't fail the request if it errors.

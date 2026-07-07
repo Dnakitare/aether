@@ -94,8 +94,16 @@ func TestRBAC(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "admin can write quotas",
+			// Quota writes are platform-only: a tenant admin must not be able
+			// to raise its own quota or set another tenant's.
+			name:       "tenant admin cannot write quotas",
 			role:       auth.RoleAdmin,
+			permission: auth.PermissionQuotaWrite,
+			want:       false,
+		},
+		{
+			name:       "platform admin can write quotas",
+			role:       auth.RolePlatformAdmin,
 			permission: auth.PermissionQuotaWrite,
 			want:       true,
 		},
@@ -110,6 +118,25 @@ func TestRBAC(t *testing.T) {
 			role:       auth.RoleViewer,
 			permission: auth.PermissionQuotaRead,
 			want:       true,
+		},
+		{
+			// Cluster topology is platform-level; tenant roles must not see it.
+			name:       "tenant admin cannot read scheduler",
+			role:       auth.RoleAdmin,
+			permission: auth.PermissionSchedulerRead,
+			want:       false,
+		},
+		{
+			name:       "platform admin can read scheduler",
+			role:       auth.RolePlatformAdmin,
+			permission: auth.PermissionSchedulerRead,
+			want:       true,
+		},
+		{
+			name:       "only platform admin holds platform permission",
+			role:       auth.RoleAdmin,
+			permission: auth.PermissionPlatformAdmin,
+			want:       false,
 		},
 	}
 

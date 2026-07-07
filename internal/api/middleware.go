@@ -104,7 +104,11 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if s.isAllowedOrigin(origin) {
+		if s.allowsAllOrigins() {
+			// Wildcard config: send the literal "*" rather than reflecting the
+			// caller's Origin, so we never echo an arbitrary origin back.
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if s.isAllowedOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
@@ -120,13 +124,24 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// isAllowedOrigin reports whether origin is in the server's allowed origins list.
+// allowsAllOrigins reports whether the server is configured with a wildcard
+// origin.
+func (s *Server) allowsAllOrigins() bool {
+	for _, allowed := range s.config.AllowedOrigins {
+		if allowed == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// isAllowedOrigin reports whether origin is explicitly in the allowed list.
 func (s *Server) isAllowedOrigin(origin string) bool {
 	if origin == "" {
 		return false
 	}
 	for _, allowed := range s.config.AllowedOrigins {
-		if allowed == "*" || allowed == origin {
+		if allowed == origin {
 			return true
 		}
 	}
@@ -256,16 +271,27 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 // requirePermission returns a handler that checks the caller has the given
-// permission before delegating to next. When auth is disabled (no claims in
-// context) the check is skipped so development mode still works.
+// permission before delegating to next.
+//
+// It denies by default: if claims are missing it allows the request only when
+// authentication is explicitly disabled (dev mode). This prevents a fail-open
+// hole where a route reachable without claims would skip authorization
+// entirely while auth is on.
 func (s *Server) requirePermission(perm auth.Permission, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := auth.GetClaims(r.Context())
-		if ok {
-			if err := auth.CheckPermission(claims, perm); err != nil {
-				s.respondError(w, http.StatusForbidden, "insufficient permissions")
+		if !ok {
+			if s.config.EnableAuth {
+				s.respondError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
+			// Auth explicitly disabled: allow for local development only.
+			next(w, r)
+			return
+		}
+		if err := auth.CheckPermission(claims, perm); err != nil {
+			s.respondError(w, http.StatusForbidden, "insufficient permissions")
+			return
 		}
 		next(w, r)
 	}

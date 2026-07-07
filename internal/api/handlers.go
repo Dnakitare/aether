@@ -519,9 +519,9 @@ func (s *Server) handleListQuotas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only admins can list all quotas
-	if !auth.IsAdmin(claims) {
-		s.respondForbidden(w, "Admin access required to list all quotas")
+	// Listing every tenant's quota is a cross-tenant operation: platform only.
+	if !auth.IsPlatformAdmin(claims) {
+		s.respondForbidden(w, "Platform admin access required to list all quotas")
 		return
 	}
 
@@ -568,7 +568,9 @@ func (s *Server) handleGetQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requestedTenantID != authTenantID && !auth.IsAdmin(claims) {
+	// A tenant may read only its own quota; reading another tenant's quota is
+	// a cross-tenant operation reserved for platform admins.
+	if requestedTenantID != authTenantID && !auth.IsPlatformAdmin(claims) {
 		s.logger.WarnContext(ctx, "tenant isolation violation on quota access",
 			"requested_tenant", requestedTenantID,
 			"auth_tenant", authTenantID,
@@ -611,15 +613,17 @@ func (s *Server) handleSetQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only admins can set quotas
+	// Setting quotas is platform-only. A tenant admin must not be able to set
+	// another tenant's quota (cross-tenant write) or raise its own
+	// (self-escalation), so this requires platform-operator authority.
 	claims, ok := auth.GetClaims(ctx)
 	if !ok {
 		s.respondUnauthorized(w, "Authentication required: no claims in context")
 		return
 	}
 
-	if !auth.IsAdmin(claims) {
-		s.respondForbidden(w, "Admin access required to set quotas")
+	if !auth.IsPlatformAdmin(claims) {
+		s.respondForbidden(w, "Platform admin access required to set quotas")
 		return
 	}
 
@@ -685,7 +689,7 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if requestedTenantID != authTenantID && !auth.IsAdmin(claims) {
+	if requestedTenantID != authTenantID && !auth.IsPlatformAdmin(claims) {
 		s.logger.WarnContext(ctx, "tenant isolation violation on usage access",
 			"requested_tenant", requestedTenantID,
 			"auth_tenant", authTenantID,

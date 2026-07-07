@@ -9,7 +9,15 @@ import (
 type Role string
 
 const (
-	// RoleAdmin has full access to all resources.
+	// RolePlatformAdmin operates the platform itself: it can act across all
+	// tenants (set any tenant's quota, view cluster topology, manage global
+	// scaling policies). Granted only via the "platform:admin" scope, which
+	// tenant-issued API keys must never carry.
+	RolePlatformAdmin Role = "platform_admin"
+
+	// RoleAdmin administers a single tenant: full agent lifecycle plus
+	// read-only quota within that tenant. It is NOT a platform operator and
+	// cannot reach other tenants or raise its own quota.
 	RoleAdmin Role = "admin"
 
 	// RoleDeveloper can create and manage agents within their tenant.
@@ -52,11 +60,22 @@ const (
 
 	// PermissionScalerWrite allows modifying scaling policies.
 	PermissionScalerWrite Permission = "scaler:write"
+
+	// PermissionPlatformAdmin allows cross-tenant, platform-level operations
+	// (setting any tenant's quota, viewing cluster topology, managing global
+	// scaling policies). Held only by RolePlatformAdmin.
+	PermissionPlatformAdmin Permission = "platform:admin"
 )
 
 // rolePermissions maps roles to their permissions.
+//
+// Tenant roles (admin/developer/viewer) are deliberately scoped to a single
+// tenant: quota writes, cross-tenant reads, cluster topology, and global
+// scaler policies all require PermissionPlatformAdmin, which only
+// RolePlatformAdmin carries. This prevents a tenant key from reading or
+// mutating another tenant's state or raising its own quota.
 var rolePermissions = map[Role][]Permission{
-	RoleAdmin: {
+	RolePlatformAdmin: {
 		PermissionAgentCreate,
 		PermissionAgentRead,
 		PermissionAgentUpdate,
@@ -67,6 +86,14 @@ var rolePermissions = map[Role][]Permission{
 		PermissionSchedulerWrite,
 		PermissionScalerRead,
 		PermissionScalerWrite,
+		PermissionPlatformAdmin,
+	},
+	RoleAdmin: {
+		PermissionAgentCreate,
+		PermissionAgentRead,
+		PermissionAgentUpdate,
+		PermissionAgentDelete,
+		PermissionQuotaRead,
 	},
 	RoleDeveloper: {
 		PermissionAgentCreate,
@@ -74,14 +101,10 @@ var rolePermissions = map[Role][]Permission{
 		PermissionAgentUpdate,
 		PermissionAgentDelete,
 		PermissionQuotaRead,
-		PermissionSchedulerRead,
-		PermissionScalerRead,
 	},
 	RoleViewer: {
 		PermissionAgentRead,
 		PermissionQuotaRead,
-		PermissionSchedulerRead,
-		PermissionScalerRead,
 	},
 }
 
@@ -115,7 +138,19 @@ func CheckPermission(claims *Claims, permission Permission) error {
 	return nil
 }
 
-// IsAdmin checks if claims represent an admin user.
+// IsAdmin checks if claims represent a tenant admin (or platform admin, which
+// is a superset). Use this only for operations scoped to the caller's own
+// tenant; cross-tenant operations must use IsPlatformAdmin.
 func IsAdmin(claims *Claims) bool {
-	return claims != nil && Role(claims.Role) == RoleAdmin
+	if claims == nil {
+		return false
+	}
+	role := Role(claims.Role)
+	return role == RoleAdmin || role == RolePlatformAdmin
+}
+
+// IsPlatformAdmin reports whether claims carry platform-operator authority,
+// required for any cross-tenant or cluster-wide operation.
+func IsPlatformAdmin(claims *Claims) bool {
+	return claims != nil && Role(claims.Role) == RolePlatformAdmin
 }

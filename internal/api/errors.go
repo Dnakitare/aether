@@ -263,9 +263,13 @@ func (s *Server) respondQuotaExceeded(w http.ResponseWriter, quotaType string, l
 	s.respondProblem(w, NewQuotaExceededError(quotaType, limit, current))
 }
 
-// respondInternalError responds with an internal server error.
+// respondInternalError responds with an internal server error. The detailed
+// message (which may contain SQL fragments, file paths, or internal hostnames)
+// is logged server-side only; the client receives a generic message so
+// internal state is not leaked across the trust boundary.
 func (s *Server) respondInternalError(w http.ResponseWriter, detail string) {
-	s.respondProblem(w, NewInternalError(detail))
+	s.logger.Error("internal server error", "detail", detail)
+	s.respondProblem(w, NewInternalError("An internal error occurred while processing the request"))
 }
 
 // respondServiceUnavailable responds with a service unavailable error.
