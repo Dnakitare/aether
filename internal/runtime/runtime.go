@@ -319,6 +319,12 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 			}
 		}
 
+		// Discard any pre-warmed VM we claimed but never handed to an agent,
+		// otherwise it leaks in the pool's inUse map and skews accounting.
+		if prewarmedVM != nil && r.prewarmingPool != nil {
+			r.prewarmingPool.DiscardVM(prewarmedVM.ID)
+		}
+
 		if r.metrics != nil {
 			r.metrics.RecordAgentOperation("create", "failed", config.TenantID)
 			r.metrics.RecordAgentError("vm_creation_failed", config.TenantID)
@@ -340,9 +346,10 @@ func (r *Runtime) CreateAgent(ctx context.Context, config api.AgentConfig) error
 	if prewarmedVM != nil {
 		r.prewarmedVMIDs[config.ID] = prewarmedVM.ID
 	}
+	agentCount := len(r.agents)
 	r.mu.Unlock()
 
-	span.SetAttributes(attribute.Int("runtime.agent_count", len(r.agents)))
+	span.SetAttributes(attribute.Int("runtime.agent_count", agentCount))
 
 	// Record successful agent creation metrics
 	if r.metrics != nil {

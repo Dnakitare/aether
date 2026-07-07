@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,6 +89,33 @@ func TestNew(t *testing.T) {
 
 		assert.NotNil(t, agent.metricsCollector)
 	})
+}
+
+// TestGetInfoConcurrentReads guards a data race where GetInfo mutated
+// a.info.Metrics while holding only a read lock, so two concurrent readers of a
+// running agent wrote the same field. GetInfo must be safe under -race.
+func TestGetInfoConcurrentReads(t *testing.T) {
+	mockVM := new(MockVM)
+	mockVM.On("Start", mock.Anything).Return(nil)
+	mockVM.On("GetMetrics", mock.Anything).Return(&api.AgentMetrics{}, nil).Maybe()
+
+	agent := createTestAgent(t, mockVM)
+	if err := agent.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	const readers = 8
+	var wg sync.WaitGroup
+	wg.Add(readers)
+	for i := 0; i < readers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 500; j++ {
+				_ = agent.GetInfo()
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestStart(t *testing.T) {

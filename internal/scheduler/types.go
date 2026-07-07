@@ -150,6 +150,52 @@ func (n *Node) RUnlock() {
 	n.mu.RUnlock()
 }
 
+// NodeSnapshot is an immutable, lock-free copy of a Node's state, safe to
+// hand to callers (e.g. JSON serialization) without racing the scheduler.
+type NodeSnapshot struct {
+	ID        string                           `json:"id"`
+	Name      string                           `json:"name"`
+	Labels    map[string]string                `json:"labels"`
+	Capacity  Resources                        `json:"capacity"`
+	Allocated Resources                        `json:"allocated"`
+	Available Resources                        `json:"available"`
+	Agents    map[api.AgentID]*AgentAllocation `json:"agents"`
+}
+
+// Snapshot returns a deep copy of the node's state taken under the node's read
+// lock. Callers must use this rather than the live *Node when serializing,
+// because marshaling the live node reads its maps while the scheduler mutates
+// them (a Go fatal: "concurrent map iteration and map write").
+func (n *Node) Snapshot() NodeSnapshot {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	labels := make(map[string]string, len(n.Labels))
+	for k, v := range n.Labels {
+		labels[k] = v
+	}
+
+	agents := make(map[api.AgentID]*AgentAllocation, len(n.Agents))
+	for id, alloc := range n.Agents {
+		allocCopy := *alloc
+		agents[id] = &allocCopy
+	}
+
+	return NodeSnapshot{
+		ID:        n.ID,
+		Name:      n.Name,
+		Labels:    labels,
+		Capacity:  n.Capacity,
+		Allocated: n.Allocated,
+		Available: Resources{
+			CPUCores: n.Capacity.CPUCores - n.Allocated.CPUCores,
+			MemoryMB: n.Capacity.MemoryMB - n.Allocated.MemoryMB,
+			DiskMB:   n.Capacity.DiskMB - n.Allocated.DiskMB,
+		},
+		Agents: agents,
+	}
+}
+
 // AgentRequest represents a request to schedule an agent.
 type AgentRequest struct {
 	Config      api.AgentConfig

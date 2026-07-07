@@ -158,12 +158,13 @@ func (a *Agent) GetInfo() api.AgentInfo {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	// Get latest metrics if running
-	if a.info.Status == api.AgentStatusRunning {
-		a.info.Metrics = a.metricsCollector.GetLatest()
+	// Return a copy so we don't mutate shared state under a read lock.
+	info := a.info
+	if info.Status == api.AgentStatusRunning {
+		info.Metrics = a.metricsCollector.GetLatest()
 	}
 
-	return a.info
+	return info
 }
 
 // GetHealth checks the agent's health.

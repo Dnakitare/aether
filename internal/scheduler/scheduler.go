@@ -268,6 +268,25 @@ func (s *Scheduler) ListNodes() []*Node {
 	return nodes
 }
 
+// ListNodeSnapshots returns lock-safe copies of all registered nodes. Callers
+// that serialize node state (e.g. the HTTP API) must use this instead of
+// ListNodes: marshaling a live *Node reads its maps while the scheduler writes
+// them, which is a Go fatal error the recovery middleware cannot catch.
+func (s *Scheduler) ListNodeSnapshots() []NodeSnapshot {
+	s.mu.RLock()
+	nodes := make([]*Node, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		nodes = append(nodes, node)
+	}
+	s.mu.RUnlock()
+
+	snapshots := make([]NodeSnapshot, 0, len(nodes))
+	for _, node := range nodes {
+		snapshots = append(snapshots, node.Snapshot())
+	}
+	return snapshots
+}
+
 // QueueLength returns the number of pending agent requests.
 func (s *Scheduler) QueueLength() int {
 	return s.queue.Len()

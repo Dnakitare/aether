@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 // --- mock runtime --------------------------------------------------------
 
 type mockRuntime struct {
+	mu               sync.Mutex // guards agents; bulk endpoints call these methods concurrently
 	agents           map[api.AgentID]*api.AgentInfo
 	GetAgentLogsFunc func(context.Context, api.AgentID, bool) (io.ReadCloser, error)
 }
@@ -28,6 +30,8 @@ func newMockRuntime() *mockRuntime {
 }
 
 func (m *mockRuntime) CreateAgent(_ context.Context, config api.AgentConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.agents[config.ID] = &api.AgentInfo{
 		Config:    config,
 		Status:    api.AgentStatusPending,
@@ -37,6 +41,8 @@ func (m *mockRuntime) CreateAgent(_ context.Context, config api.AgentConfig) err
 }
 
 func (m *mockRuntime) StartAgent(_ context.Context, id api.AgentID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	a, ok := m.agents[id]
 	if !ok {
 		return fmt.Errorf("agent %s not found", id)
@@ -46,6 +52,8 @@ func (m *mockRuntime) StartAgent(_ context.Context, id api.AgentID) error {
 }
 
 func (m *mockRuntime) StopAgent(_ context.Context, id api.AgentID, _ time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	a, ok := m.agents[id]
 	if !ok {
 		return fmt.Errorf("agent %s not found", id)
@@ -55,6 +63,8 @@ func (m *mockRuntime) StopAgent(_ context.Context, id api.AgentID, _ time.Durati
 }
 
 func (m *mockRuntime) DestroyAgent(_ context.Context, id api.AgentID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.agents[id]; !ok {
 		return fmt.Errorf("agent %s not found", id)
 	}
@@ -63,6 +73,8 @@ func (m *mockRuntime) DestroyAgent(_ context.Context, id api.AgentID) error {
 }
 
 func (m *mockRuntime) GetAgent(_ context.Context, id api.AgentID) (*api.AgentInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	a, ok := m.agents[id]
 	if !ok {
 		return nil, fmt.Errorf("agent %s not found", id)
@@ -71,6 +83,8 @@ func (m *mockRuntime) GetAgent(_ context.Context, id api.AgentID) (*api.AgentInf
 }
 
 func (m *mockRuntime) ListAgents(_ context.Context, tenantID *api.TenantID) ([]*api.AgentInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var result []*api.AgentInfo
 	for _, a := range m.agents {
 		if tenantID == nil || a.Config.TenantID == *tenantID {
@@ -88,6 +102,8 @@ func (m *mockRuntime) GetAgentLogs(ctx context.Context, id api.AgentID, follow b
 }
 
 func (m *mockRuntime) GetAgentHealth(_ context.Context, id api.AgentID) (*api.HealthStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.agents[id]; !ok {
 		return nil, fmt.Errorf("agent %s not found", id)
 	}

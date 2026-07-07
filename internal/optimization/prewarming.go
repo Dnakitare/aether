@@ -400,27 +400,43 @@ func (pp *PrewarmingPool) maintainPools(ctx context.Context) {
 	}
 }
 
-// checkAndRefillPools checks pool sizes and refills if needed
+// checkAndRefillPools checks pool sizes and refills if needed.
+//
+// It snapshots the workload types under a brief read lock and releases pp.mu
+// before calling refillPool. Holding pp.mu across refillPool would re-acquire
+// the read lock via getPool; if a writer (e.g. updateMetrics) arrived in
+// between, Go's RWMutex blocks the nested reader behind the waiting writer,
+// deadlocking the maintenance loop.
 func (pp *PrewarmingPool) checkAndRefillPools(ctx context.Context) {
+	type poolCheck struct {
+		workloadType WorkloadType
+		pool         *vmPool
+	}
+
 	pp.mu.RLock()
-	defer pp.mu.RUnlock()
-
+	checks := make([]poolCheck, 0, len(pp.pools))
 	for workloadType, pool := range pp.pools {
-		pool.mu.RLock()
-		available := len(pool.available)
-		targetSize := pp.config.PoolSize[workloadType]
-		pool.mu.RUnlock()
+		checks = append(checks, poolCheck{workloadType, pool})
+	}
+	config := pp.config
+	pp.mu.RUnlock()
 
-		refillThreshold := int(float64(targetSize) * pp.config.RefillThreshold)
+	for _, c := range checks {
+		c.pool.mu.RLock()
+		available := len(c.pool.available)
+		c.pool.mu.RUnlock()
+
+		targetSize := config.PoolSize[c.workloadType]
+		refillThreshold := int(float64(targetSize) * config.RefillThreshold)
 
 		if available < refillThreshold {
 			pp.logger.Info("pool below threshold, refilling",
-				"workload_type", workloadType,
+				"workload_type", c.workloadType,
 				"available", available,
 				"target", targetSize,
 			)
 
-			pp.refillPool(ctx, workloadType)
+			pp.refillPool(ctx, c.workloadType)
 		}
 	}
 }

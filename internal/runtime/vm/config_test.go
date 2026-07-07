@@ -51,6 +51,30 @@ func TestFromAgentConfig(t *testing.T) {
 	}
 }
 
+// TestFromAgentConfigShortIDNoPanic guards a slice-out-of-range panic: agent IDs
+// as short as one character pass ValidateAgentID, but the TAP device name used
+// to derive the first 8 chars of the ID. Short IDs must be padded, not sliced raw.
+func TestFromAgentConfigShortIDNoPanic(t *testing.T) {
+	paths := vm.VMPaths{KernelImage: "/k", RootFS: "/r", Socket: "/s", Log: "/l", Metrics: "/m", WorkDir: "/w"}
+
+	for _, id := range []string{"a", "ab", "abc", "1234567", "12345678"} {
+		agentConfig := api.AgentConfig{
+			ID:        api.AgentID(id),
+			TenantID:  api.TenantID("tenant-1"),
+			Resources: api.ResourceLimits{CPUCount: 1, MemoryMB: 256},
+		}
+
+		vmConfig := vm.FromAgentConfig(agentConfig, paths) // must not panic
+		if len(vmConfig.NetworkInterfaces) != 1 {
+			t.Fatalf("id %q: NetworkInterfaces length = %d, want 1", id, len(vmConfig.NetworkInterfaces))
+		}
+		dev := vmConfig.NetworkInterfaces[0].HostDevName
+		if len(dev) != len("tap")+8 {
+			t.Errorf("id %q: HostDevName = %q, want length %d", id, dev, len("tap")+8)
+		}
+	}
+}
+
 func TestVMConfig(t *testing.T) {
 	config := vm.VMConfig{
 		ID:              "vm-1",

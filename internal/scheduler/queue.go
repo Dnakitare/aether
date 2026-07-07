@@ -31,7 +31,11 @@ func (q *Queue) Enqueue(req *AgentRequest) {
 	defer q.mu.Unlock()
 
 	heap.Push(&q.items, req)
-	q.index[req.Config.ID] = len(q.items) - 1
+	// heap.Push sifts the new item up via Swap, which does not maintain
+	// q.index, so the final position isn't len-1. Rebuild the whole index
+	// (as Dequeue/Remove do) so a subsequent Remove can't evict the wrong
+	// agent off a stale index.
+	q.rebuildIndex()
 }
 
 // Dequeue removes and returns the highest priority request.

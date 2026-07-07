@@ -732,7 +732,7 @@ func (s *Server) handleGetSchedulerStats(w http.ResponseWriter, r *http.Request)
 // @Description  Returns all nodes registered with the scheduler
 // @Tags         scheduler
 // @Produce      json
-// @Success      200  {array}   scheduler.Node
+// @Success      200  {array}   scheduler.NodeSnapshot
 // @Failure      503  {object}  ProblemDetail
 // @Security     BearerAuth
 // @Router       /scheduler/nodes [get]
@@ -742,7 +742,7 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodes := s.scheduler.ListNodes()
+	nodes := s.scheduler.ListNodeSnapshots()
 	s.respondJSON(w, http.StatusOK, nodes)
 }
 

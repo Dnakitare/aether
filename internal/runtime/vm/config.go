@@ -65,7 +65,7 @@ func FromAgentConfig(agentConfig api.AgentConfig, paths VMPaths) VMConfig {
 		NetworkInterfaces: []NetworkInterface{
 			{
 				ID:          "eth0",
-				HostDevName: "tap" + string(agentConfig.ID)[:8],
+				HostDevName: tapDevName(string(agentConfig.ID)),
 				GuestMAC:    generateMAC(string(agentConfig.ID)),
 				AllowMMDS:   true,
 			},
@@ -95,6 +95,16 @@ type VMPaths struct {
 
 	// WorkDir is the working directory for this VM.
 	WorkDir string
+}
+
+// tapDevName derives the host TAP interface name for an agent. It uses the
+// first 8 characters of the agent ID, padding short IDs so the slice never
+// panics. The result stays within Linux's 15-char interface-name limit.
+func tapDevName(id string) string {
+	if len(id) < 8 {
+		id = id + "00000000"
+	}
+	return "tap" + id[:8]
 }
 
 // generateMAC generates a MAC address from an agent ID.
