@@ -86,5 +86,5 @@ profiles/
 # Docker
 docker-compose.override.yml
 
-# Scratchpad (Claude Code temporary files)
-.claude/scratchpad/
+# Local AI/editor harness config (not part of the published project)
+.claude/

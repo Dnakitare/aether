@@ -114,8 +114,9 @@ tidy: ## Tidy and verify go.mod
 clean: ## Clean build artifacts
 	@echo "Cleaning..."
 	$(GOCLEAN)
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) profiles
 	rm -f $(COVERAGE_FILE) $(COVERAGE_HTML)
+	rm -f aether docker load.test coverage*.out coverage*.txt coverage*.html
 	@echo "Clean complete"
 
 tools: ## Install development tools

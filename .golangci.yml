@@ -12,9 +12,9 @@ linters:
     - staticcheck   # Advanced Go linter
     - gofmt         # Checks whether code was gofmt-ed
     - misspell      # Finds commonly misspelled English words
+    - errcheck      # Unchecked errors (cleanup-only sites excluded per-path below)
+    - unused        # Dead code
   disable:
-    - errcheck      # Too many false positives for cleanup code
-    - unused        # Too many false positives
     - goimports     # Handled by gofmt
     - revive        # Too strict for this project
     - gocritic      # Too many style warnings
@@ -70,6 +70,12 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 
+  # Conventional cleanup and best-effort writes whose errors are not
+  # actionable. errcheck stays on for every other unchecked error.
+  exclude:
+    - "Error return value of `[^`]*\\.(Close|Rollback)` is not checked"
+    - "Error return value of `[^`]*\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Encode|Write)` is not checked"
+
   exclude-rules:
     # Exclude some linters from running on tests files
     - path: _test\.go
@@ -92,6 +98,11 @@ issues:
       linters:
         - errcheck
         - revive
+
+    # Test helpers (non-_test.go files under tests/) use cleanup-only defers
+    - path: tests/
+      linters:
+        - errcheck
 
 output:
   sort-results: true

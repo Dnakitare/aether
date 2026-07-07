@@ -253,11 +253,6 @@ func (s *Server) respondForbidden(w http.ResponseWriter, detail string) {
 	s.respondProblem(w, NewForbiddenError(detail))
 }
 
-// respondConflict responds with a conflict error.
-func (s *Server) respondConflict(w http.ResponseWriter, detail string) {
-	s.respondProblem(w, NewConflictError(detail))
-}
-
 // respondQuotaExceeded responds with a quota exceeded error.
 func (s *Server) respondQuotaExceeded(w http.ResponseWriter, quotaType string, limit, current int64) {
 	s.respondProblem(w, NewQuotaExceededError(quotaType, limit, current))

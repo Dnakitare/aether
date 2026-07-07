@@ -3,10 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -428,24 +426,6 @@ func TestAgentLifecycleWorkflow(t *testing.T) {
 		assert.NotNil(t, runtime)
 		// Actual workflow testing requires VM infrastructure
 	})
-}
-
-// Mock reader for testing
-
-type mockReadCloser struct {
-	reader io.Reader
-}
-
-func (m *mockReadCloser) Read(p []byte) (n int, err error) {
-	return m.reader.Read(p)
-}
-
-func (m *mockReadCloser) Close() error {
-	return nil
-}
-
-func newMockReadCloser(s string) io.ReadCloser {
-	return &mockReadCloser{reader: strings.NewReader(s)}
 }
 
 // Error scenario tests
