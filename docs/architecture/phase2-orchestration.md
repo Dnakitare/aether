@@ -107,7 +107,7 @@ Multi-tenant quota enforcement and resource reservations.
 
 ### 4. HTTP API Server (`internal/api/`)
 
-Production-ready REST API with OpenAPI specification.
+REST API with OpenAPI specification.
 
 #### Endpoints:
 
@@ -366,7 +366,6 @@ curl -X POST http://localhost:8080/v1/scaler/policies \
 
 Phase 3 will add:
 - **Multi-tenancy enforcement** with network isolation
-- **Secrets management** with HashiCorp Vault
 - **Audit logging** to PostgreSQL
 - **API key management** for service accounts
 - **State persistence** with Redis

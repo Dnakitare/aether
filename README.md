@@ -1,120 +1,93 @@
 # Aether
 
-**Modern AI Agent Runtime with Hardware-Level Isolation** (Beta v0.2.0)
+**AI Agent Runtime with Hardware-Level Isolation** (Beta v0.2.0)
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/dnakitare/aether/ci.yml?branch=main)](https://github.com/dnakitare/aether/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/go-1.24-blue)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Development Status](https://img.shields.io/badge/status-beta-blue)](https://github.com/dnakitare/aether)
 
-Aether is a runtime for AI agents with secure isolation, intelligent orchestration, and observability. Built on **Firecracker microVMs**, Aether is designed to run untrusted workloads safely and efficiently.
+Aether runs each AI agent inside its own [Firecracker](https://firecracker-microvm.github.io/) microVM, the same KVM technology behind AWS Lambda. You POST an agent config to a REST API and get back a hardware-isolated execution environment with multi-tenant quotas, JWT/RBAC auth, an in-process scheduler, PostgreSQL-backed state, and OpenTelemetry observability.
 
-**Think Docker for AI agents** – but with security and multi-tenancy from day one.
+Think "Docker for AI agents," but with VM-grade isolation for untrusted workloads.
 
-> ⚠️ **Project Status: Beta v0.2.0**
-> Aether has reached beta with the core control plane integrated: HTTP API, distributed scheduler, PostgreSQL persistence, OpenTelemetry observability, and Kubernetes/Terraform deployment on AWS. Kafka messaging, HashiCorp Vault secrets, and GCE node provisioning are present but **experimental**. Not yet recommended for production workloads. Targeting v1.0 in Q3 2026 — see [docs/V1_SCOPE.md](docs/V1_SCOPE.md) for the v1.0 scope and shipping criteria.
-
----
-
-## ✨ Vision
-
-### 🔒 Security First
-
-- **Hardware-Level Isolation**: Firecracker microVMs with KVM virtualization
-- **Multi-Tenant Architecture**: Complete tenant isolation (network, compute, data)
-- **Secrets Management**: Designed for HashiCorp Vault integration
-- **Authentication**: JWT + API keys with RBAC
-
-### 🚀 Production Goals
-
-- **High Availability**: Multi-AZ deployment with automatic failover
-- **Disaster Recovery**: Automated backups, point-in-time recovery
-- **Observability**: Distributed tracing (Jaeger), metrics (Prometheus), logs
-- **Scalability**: Designed for 10,000+ concurrent agents
-
-### 🧠 Intelligent Orchestration
-
-- **Smart Scheduling**: Bin-packing, spread, and best-fit placement strategies
-- **Auto-Scaling**: Policy-based horizontal scaling (planned)
-- **Resource Quotas**: Per-tenant CPU, memory, disk limits
-- **Rate Limiting**: Token bucket algorithm with multi-tier support
+> **Project status: Beta v0.2.0.** Aether is a single-region control plane: HTTP API, in-process scheduler, PostgreSQL persistence, Redis-backed rate limiting, and OpenTelemetry observability, deployable to a single cloud region via Docker, Kubernetes, Helm, or Terraform. It is not recommended for production workloads yet. See [docs/V1_SCOPE.md](docs/V1_SCOPE.md) for the v1.0 scope and shipping criteria.
 
 ---
 
-## 🎯 Use Cases
+## What it does
 
-- **AI Agent Platforms**: Run LLM agents, autonomous systems, AI assistants
-- **Code Execution Services**: Sandboxed code execution (e.g., Jupyter, REPL)
-- **CI/CD Runners**: Isolated build environments
-- **Function-as-a-Service**: Serverless function runtime
-- **Multi-Tenant SaaS**: Any workload requiring strong isolation
+### Isolation and multi-tenancy
+- **Hardware isolation**: each agent runs in a Firecracker microVM (KVM), not a shared-kernel container
+- **Multi-tenant**: per-tenant quotas (CPU, memory, disk) and tenant isolation on every API path
+- **Auth**: JWT plus API keys, with role-based access control (platform admin, tenant admin, developer, viewer)
+
+### Orchestration
+- **Scheduler**: bin-packing, spread, and best-fit placement strategies, with anti-affinity constraints
+- **Resource quotas**: per-tenant limits enforced atomically at creation time
+- **Rate limiting**: token-bucket limiter (Redis-backed, degrades to allow on infrastructure errors)
+
+### State and observability
+- **Durable state**: agent lifecycle persisted to PostgreSQL with transactional writes
+- **Checkpoints**: metadata-level agent-state checkpoint and restore (full VM snapshot via CRIU is future work)
+- **Observability**: OpenTelemetry tracing, Prometheus metrics, structured JSON logs with trace correlation
 
 ---
 
-## 🏗️ Architecture
+## Use cases
+
+- **AI agent platforms**: run LLM agents and autonomous systems with untrusted-code isolation
+- **Sandboxed code execution**: REPLs, notebooks, evaluation harnesses
+- **CI/CD runners**: isolated build environments
+- **Multi-tenant SaaS**: any workload that needs strong per-tenant isolation
+
+---
+
+## Architecture
+
+Aether is a single-instance control plane in front of Firecracker compute:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Load Balancer                           │
-│                   (TLS, WAF, DDoS Protection)                │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-            ┌────────────┼────────────┐
-            │            │            │
-   ┌────────▼──────┐  ┌──▼──────┐  ┌▼──────────┐
-   │  API Server 1  │  │API Srv 2│  │API Srv 3  │
-   │  (Stateless)   │  │(Stless) │  │(Stateless)│
-   └────────┬───────┘  └───┬─────┘  └─────┬─────┘
-            │              │              │
-            └──────────────┼──────────────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-         ┌────▼────┐  ┌────▼────┐  ┌───▼─────┐
-         │Scheduler│  │Scheduler│  │Scheduler│
-         │(Leader) │──│(Follower)──│(Follower)│
-         └────┬────┘  └─────────┘  └─────────┘
-              │
-              │ Placement Decisions
-              │
-    ┌─────────▼──────────────────────────────┐
-    │      Compute Nodes (10-50+ nodes)      │
-    │  ┌──────────┐  ┌──────────┐           │
-    │  │  Node 1  │  │  Node 2  │  ...      │
-    │  │┌────┐┌───┐│ │┌────┐┌───┐│          │
-    │  ││VM1 ││VM2││ ││VM3 ││VM4││          │
-    │  │└────┘└───┘│ │└────┘└───┘│          │
-    │  └──────────┘  └──────────┘           │
-    └────────────────────────────────────────┘
-                      │
-      ┌───────────────┼───────────────┐
-      │               │               │
- ┌────▼────┐    ┌────▼────┐    ┌────▼────┐
- │PostgreSQL│    │  Redis  │    │  etcd   │
- │(Multi-AZ)│    │(Multi-AZ)│    │(Cluster)│
- └─────────┘    └─────────┘    └─────────┘
+                    ┌──────────────────────┐
+   HTTP clients ──▶ │      API Server      │  JWT/RBAC, rate limiting,
+                    │     (gorilla/mux)     │  tenant quotas, handlers
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │   In-process         │  bin-packing / spread /
+                    │   Scheduler          │  best-fit + anti-affinity
+                    └──────────┬───────────┘
+                               │ placement
+                    ┌──────────▼───────────┐
+                    │   Runtime + VM       │  create / start / stop /
+                    │   Manager            │  destroy Firecracker VMs
+                    └──────────┬───────────┘
+                               │
+              ┌────────────────┴────────────────┐
+         ┌────▼─────┐                      ┌─────▼─────┐
+         │PostgreSQL│  durable state       │   Redis   │  rate limiting
+         │          │  + audit log         │           │
+         └──────────┘                      └───────────┘
 ```
 
-**Key Components**:
-- **API Servers**: HTTP REST API (functional, fully wired) ✅
-- **Schedulers**: Distributed scheduler with leader election (functional) ✅
-- **Compute Nodes**: Firecracker VM management (functional, integrated) ✅
-- **PostgreSQL**: Durable state, audit logs (functional with state store) ✅
-- **Redis**: Cache, distributed locks, rate limiting (integrated) ✅
-- **etcd**: Leader election, distributed coordination (integrated) ✅
+**Components**:
+- **API server**: REST API, middleware chain (request tracking, request ID, tracing, logging, recovery, rate limiting, CORS), JWT/RBAC auth
+- **Scheduler**: in-process placement with three strategies and anti-affinity
+- **Runtime + VM manager**: Firecracker microVM lifecycle (Linux/KVM; macOS builds skip VM operations for development)
+- **PostgreSQL**: durable agent state and the audit log
+- **Redis**: token-bucket rate limiting
 
 ---
 
-## 🚀 Quick Start
+## Quick start
 
 ### Prerequisites
-
-- **OS**: Linux with KVM support (or macOS for development without VMs)
+- **OS**: Linux with KVM for VM operations, or macOS for development without VMs
 - **Go**: 1.24 or later
-- **Docker**: For dependencies (PostgreSQL, Redis, etcd)
-- **Firecracker** (optional): For full VM functionality on Linux
+- **Docker**: for PostgreSQL and Redis
+- **Firecracker** (optional): required only for real VM operations on Linux
 
-### Alpha Quick Start (5 minutes)
+### Build and run (about 5 minutes)
 
 ```bash
 # 1. Clone and build
@@ -123,404 +96,202 @@ cd aether
 go mod download
 go build -o aether ./cmd/aether
 
-# 2. Start infrastructure
-docker-compose -f deployments/docker/docker-compose.dev.yml up -d
-
-# Wait for PostgreSQL to be ready
+# 2. Start dependencies (PostgreSQL + Redis)
+docker-compose up -d
 sleep 5
 
-# 3. Set environment variables
+# 3. Configure
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/aether?sslmode=disable"
-export JWT_SECRET="your-secret-key-change-in-production"
+export JWT_SECRET="change-me-to-a-random-string-min-32-chars"
 export SERVER_ADDRESS=":8080"
 
-# 4. Start the Aether server
+# 4. Run migrations and start the server
+./aether migrate up
 ./aether server
-
-# Server will start on http://localhost:8080
-# Logs will show: "Aether server started successfully"
+# Server listens on http://localhost:8080
 ```
 
-### Running Your First Agent (CLI)
+### CLI
 
 ```bash
-# In another terminal
-export DATABASE_URL="postgres://postgres:postgres@localhost:5432/aether?sslmode=disable"
-
-# Create and start an agent
-./aether agent create --name "my-first-agent" --image "python:3.11"
-
-# List agents
+# Agent lifecycle
+./aether agent create --name "my-agent" --image "python:3.11"
 ./aether agent list
-
-# View agent logs
 ./aether agent logs <agent-id>
-
-# Stop agent
 ./aether agent stop <agent-id>
-
-# Clean up
 ./aether agent destroy <agent-id>
-```
 
-### Daemon Mode (No HTTP API)
+# State checkpoints (metadata-level)
+./aether agent checkpoint create <agent-id>
+./aether agent checkpoint list <agent-id>
+./aether agent checkpoint restore <agent-id> --version 3
 
-```bash
-# Start the runtime daemon without the HTTP API server.
-# Optionally set DATABASE_URL to enable PostgreSQL persistence.
+# Database migrations
+./aether migrate up
+./aether migrate version
+
+# Runtime daemon without the HTTP API
 ./aether daemon
 ```
 
-### Database Migrations
+### Tests
 
 ```bash
-# Apply all pending migrations
-./aether migrate up
-
-# Roll back the last migration
-./aether migrate down
-
-# Show current schema version
-./aether migrate version
-```
-
-### State Checkpoints
-
-```bash
-# Create a checkpoint of agent state
-./aether agent checkpoint create <agent-id>
-
-# List checkpoints for an agent
-./aether agent checkpoint list <agent-id>
-
-# Restore from a specific checkpoint version
-./aether agent checkpoint restore <agent-id> --version 3
-
-# Delete a checkpoint
-./aether agent checkpoint delete <agent-id> <version>
-```
-
-### Running Tests
-
-```bash
-# Unit tests (fast, no infrastructure required)
+# Unit tests, no infrastructure needed
 go test -short ./...
 
-# Integration tests (requires Docker infrastructure)
+# With the race detector (as CI runs them)
+go test -short -race ./...
+
+# Integration tests (needs Docker: PostgreSQL + Redis)
 docker-compose -f docker-compose.test.yml up -d
 go test ./tests/integration/...
-
-# E2E tests (validates complete workflow)
-go test -v ./tests/integration/e2e_workflow_test.go
-
-# Comprehensive test suites
-go test -v ./internal/scheduler/... -run Comprehensive
-go test -v ./internal/backup/... -run Comprehensive
-go test -v ./internal/ha/... -run Comprehensive
 ```
-
-### What Works in Beta v0.2.0
-
-✅ **Core Functionality** (End-to-End Working):
-- **Agent Lifecycle**: Create, start, stop, destroy agents with PostgreSQL persistence
-- **HTTP API Server**: Fully wired REST API with all components integrated
-- **Firecracker VM Management**: Complete VM lifecycle with proper configuration
-- **JWT Authentication**: Token generation, validation, and API key management
-- **Distributed Scheduler**: Bin-packing, spread, and best-fit placement strategies with anti-affinity constraints
-- **PostgreSQL State Store**: Durable agent state with CRUD operations
-- **Redis Integration**: Caching, distributed locks, rate limiting
-- **HA Leader Election**: etcd-based consensus for multi-instance deployments
-- **Rate Limiting**: Token bucket algorithm with multi-tier support
-- **Backup/Restore**: Automated PostgreSQL + Redis backup and recovery
-- **Security**: Input validation, injection prevention, RBAC, tenant isolation
-
-✅ **Testing**:
-- **E2E Integration Tests**: Complete agent lifecycle validation
-- **Comprehensive Test Suites**: Scheduler, HA, backup, auth, rate limiting
-- **Infrastructure-Aware**: Tests skip gracefully when dependencies unavailable
-- **CI-Ready**: Short mode for fast CI runs, full mode for local testing
-
-🚧 **Alpha Limitations**:
-- Firecracker requires Linux with KVM (development on macOS skips VM operations)
-- Checkpoint/restore saves metadata state only (full VM snapshot via CRIU planned for beta)
-- Auto-scaling policies defined but evaluation loop not yet production-tested
-
-❌ **Not Yet Implemented**:
-- Multi-region support
-- Full CRIU-based VM checkpoint/restore
-- Advanced auto-scaling evaluation at scale
 
 ---
 
-## 📚 Documentation
+## What works in Beta v0.2.0
 
-### Architecture & Design
+Working end to end:
+- Agent lifecycle (create, start, stop, destroy) with PostgreSQL persistence
+- Fully wired HTTP REST API with the complete middleware chain
+- Firecracker VM lifecycle and configuration
+- JWT auth, API keys, and RBAC with multi-tenant isolation
+- In-process scheduler with three placement strategies and anti-affinity
+- Per-tenant resource quotas, enforced atomically
+- Redis-backed token-bucket rate limiting
+- OpenTelemetry tracing, Prometheus metrics, structured logging
+- Metadata-level agent-state checkpoint and restore
 
-- [Architecture Overview](docs/architecture/ARCHITECTURE.md) - System design and components
-- [Architecture Decision Records (ADRs)](docs/architecture/adr/) - Design rationale
-
-**Key ADRs**:
-- [ADR-001: Firecracker for VM Isolation](docs/architecture/adr/001-firecracker-vms.md)
-- [ADR-002: Distributed Scheduler](docs/architecture/adr/002-distributed-scheduler.md)
-- [ADR-003: PostgreSQL + Redis State Management](docs/architecture/adr/003-state-management.md)
-- [ADR-004: JWT Authentication](docs/architecture/adr/004-jwt-authentication.md)
-
-### Development
-
-- **Security**: See [SECURITY.md](SECURITY.md) for security architecture
-- **Upgrade Guide**: See [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md) for version migration
+Known limitations:
+- Firecracker needs Linux with KVM; macOS development skips VM operations
+- Checkpoint/restore saves metadata only; full VM snapshot via CRIU is planned
+- Auto-scaling policies exist but the evaluation loop is not production-tested
+- Single region, single instance; multi-region and multi-instance are not in scope for v1.0
 
 ---
 
-## 🛠️ Development
+## Documentation
 
-### Building from Source
+- [Architecture overview](docs/architecture/ARCHITECTURE.md)
+- [Architecture Decision Records](docs/architecture/adr/)
+- [Security model](SECURITY.md)
+- [v1.0 scope and shipping criteria](docs/V1_SCOPE.md)
+- [Upgrade guide](UPGRADE_GUIDE.md)
 
-```bash
-# Clone and build
-git clone https://github.com/dnakitare/aether.git
-cd aether
-go build -o aether ./cmd/aether
+---
 
-# Run tests with coverage
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-### Project Structure
+## Project structure
 
 ```
 aether/
-├── cmd/aether/              # CLI: server, daemon, agent, migrate commands
+├── cmd/aether/          # CLI: server, daemon, agent, migrate
 ├── internal/
-│   ├── api/                 # HTTP REST API server, handlers, middleware
-│   ├── audit/               # Immutable audit logging
-│   ├── auth/                # JWT, API keys, RBAC
-│   ├── backup/              # PostgreSQL + Redis backup/restore
-│   ├── cli/                 # Terminal UI helpers (spinners, tables)
-│   ├── config/              # Viper-based configuration loading
-│   ├── database/            # Migration runner (golang-migrate)
-│   ├── ha/                  # High availability, leader election
-│   ├── observability/       # OpenTelemetry tracing, Prometheus metrics
-│   ├── optimization/        # VM pre-warming pool
-│   ├── ratelimit/           # Token bucket rate limiting (Redis-backed)
-│   ├── recovery/            # Agent state checkpointing
-│   ├── runtime/             # Agent + VM lifecycle management
-│   ├── scaler/              # Policy-based auto-scaling
-│   ├── scheduler/           # Placement strategies + distributed scheduler
-│   ├── state/               # PostgreSQL + Redis persistence
-│   ├── tenant/              # Multi-tenant quota management
-│   └── ...                  # messaging, retry, routing, secrets, shutdown
-├── pkg/api/                 # Public API types and interfaces
-├── deployments/
-│   ├── docker/              # Dockerfile, Docker Compose (dev/test)
-│   ├── kubernetes/          # K8s manifests + Kustomize
-│   ├── terraform/           # AWS/GCP/Azure infrastructure
-│   ├── prometheus/          # Prometheus + AlertManager config
-│   └── grafana/             # Dashboards + datasource provisioning
-├── helm/aether/             # Helm chart with PostgreSQL/Redis deps
-├── migrations/              # Embedded SQL schema migrations
-├── docs/                    # Architecture, ADRs, API reference, guides
+│   ├── api/             # HTTP REST API, handlers, middleware, health
+│   ├── audit/           # HMAC-chained audit log
+│   ├── auth/            # JWT, API keys, RBAC
+│   ├── cli/             # terminal output helpers
+│   ├── config/          # Viper-based configuration
+│   ├── database/        # migration runner (golang-migrate)
+│   ├── observability/   # OpenTelemetry tracing, Prometheus metrics
+│   ├── optimization/    # VM pre-warming pool
+│   ├── ratelimit/       # token-bucket rate limiting (Redis)
+│   ├── recovery/        # agent-state checkpointing
+│   ├── runtime/         # agent + Firecracker VM lifecycle
+│   ├── scaler/          # policy-based auto-scaling
+│   ├── scheduler/       # placement strategies + in-process queue
+│   ├── state/           # PostgreSQL + Redis persistence
+│   ├── shutdown/        # graceful shutdown coordination
+│   └── tenant/          # multi-tenant quota management
+├── pkg/api/             # public API types and interfaces
+├── deployments/         # Docker, Kubernetes, Terraform (AWS + GCP), Prometheus, Grafana
+├── helm/aether/         # Helm chart (PostgreSQL + Redis deps)
+├── migrations/          # embedded SQL migrations
+├── docs/                # architecture, ADRs, API reference, guides
 └── tests/
-    ├── integration/         # E2E + component integration tests
-    ├── security/            # Auth, injection, tenant isolation tests
-    ├── chaos/               # Chaos testing helpers
-    └── load/                # Load and performance tests
+    ├── integration/     # end-to-end + component integration
+    ├── security/        # auth, injection, tenant isolation
+    └── chaos/           # fault-injection helpers
 ```
 
 ---
 
-## 📊 Current Status
+## Testing and coverage
 
-### Beta v0.2.0 (April 2026)
+- **349 test functions** across unit, integration, security, and chaos suites
+- **~53% overall coverage** (unit tests, short mode). Well-covered core: config (89%), rate limiting (85%), auth (82%), scheduler (85%). Lower on the runtime and API handlers, which is the focus for v1.0.
+- CI runs build, `go vet`, `golangci-lint`, and `go test -race` on every push
 
-| Component | Status | Coverage | Notes |
-|-----------|--------|----------|-------|
-| **Core Runtime** | ✅ Complete | 65% | Full agent lifecycle integrated |
-| **HTTP API Server** | ✅ Complete | 58% | All components wired |
-| **Scheduler** | ✅ Complete | 82% | Bin-packing, spread, best-fit |
-| **VM Lifecycle** | ✅ Complete | 60% | Firecracker integrated |
-| **PostgreSQL State** | ✅ Complete | 72% | Full CRUD operations |
-| **HA/Leader Election** | ✅ Complete | 71% | etcd-based consensus |
-| **Auth (JWT/API Key)** | ✅ Complete | 78% | RBAC, token management |
-| **Rate Limiting** | ✅ Complete | 85% | Token bucket algorithm |
-| **Backup/Restore** | ✅ Complete | 68% | PostgreSQL + Redis backup |
-| **E2E Tests** | ✅ Complete | 75% | Full lifecycle validation |
-| Checkpointing | 🟡 Partial | 40% | Metadata checkpoint/restore; full VM snapshot planned |
-| Observability | ✅ Complete | 60% | OpenTelemetry tracing, Prometheus metrics, structured logging |
-| CLI Tool | ✅ Complete | 50% | server, daemon, agent, migrate, checkpoint commands |
-| Kafka Integration | ✅ Complete | 55% | Distributed queue with DLQ and in-memory fallback |
-| Deployment | ✅ Complete | — | Dockerfile, Helm, Kubernetes, Terraform (AWS) |
-
-**Overall Test Coverage**: ~35% (measured), targeting 60% for beta
-
-### Completion Summary
-
-- ✅ **Phase 1**: Security (auth, isolation, validation) - Complete
-- ✅ **Phase 4**: High Availability - Complete
-- ✅ **Phase 5**: Disaster Recovery - Complete
-- ✅ **Phase 6**: Observability (design) - Complete
-- ✅ **Phase 7**: Test Coverage & Integration - Complete
-- ✅ **Alpha Integration**: All core components wired and functional
+The v1.0 target is ≥ 70% coverage on the supported surface. See [docs/V1_SCOPE.md](docs/V1_SCOPE.md).
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
-### ✅ Alpha v0.1.0 (Released: February 2026)
+### Beta v0.2.0 (current)
+Single-region control plane integrated and tested: HTTP API, in-process scheduler, PostgreSQL state, Redis rate limiting, OpenTelemetry observability, metadata checkpointing, and single-cloud deployment.
 
-**Focus**: Minimal end-to-end agent lifecycle
+### v1.0 (target: Q3 2026)
+Harden the single-region surface to a defensible release. Shipping criteria, each measurable:
 
-- [x] Wire API server to scheduler
-- [x] Complete VM lifecycle integration
-- [x] Basic CLI commands
-- [x] End-to-end tests (create, run, destroy agent)
-- [x] Developer documentation
-- [x] PostgreSQL state persistence
-- [x] Firecracker VM management
+- [ ] ≥ 70% test coverage on the supported surface
+- [ ] One external security review (auth, multi-tenant isolation, Firecracker boundary), P0/P1 findings closed
+- [ ] 1,000-agent load test on a single region, raw numbers published in `docs/V1_LOAD_TEST.md`
+- [ ] One external adopter running a v1.0 release candidate on a real workload for at least two weeks
 
-**Status**: ✅ Complete (February 15, 2026)
-
-### ✅ Beta v0.2.0 (Released: April 2026)
-
-**Focus**: Core control plane integrated
-
-- [x] Observability stack (OpenTelemetry tracing, Prometheus metrics, Grafana dashboards)
-- [x] Kafka distributed scheduling queue with DLQ *(experimental — see v1.0 below)*
-- [x] Resource quotas and tenant management
-- [x] Deployment automation (Terraform, Kubernetes, Helm)
-- [x] Database migrations CLI (`migrate up/down/version`)
-- [x] Checkpoint metadata save/restore
-
-### Production v1.0 (Target: Q3 2026)
-
-**Focus**: Single-region, hardware-isolated agent runtime — hardened to a defensible release.
-
-The supported v1.0 surface is the integrated control plane that exists today: HTTP API, JWT/RBAC auth, distributed scheduler, PostgreSQL state, Redis quotas, OpenTelemetry observability, and single-cloud (AWS) deployment via Helm + Terraform. See [docs/V1_SCOPE.md](docs/V1_SCOPE.md) for the full scope document.
-
-**Shipping criteria** (each measurable):
-
-- [ ] ≥ 70% test coverage on the in-scope surface (experimental and deferred packages excluded from the denominator)
-- [ ] One external security review pass — auth, multi-tenant isolation, Firecracker boundary; P0/P1 findings closed before ship
-- [ ] 1,000-agent load test on a single AWS region, raw numbers published in `docs/V1_LOAD_TEST.md`
-- [ ] One real external adopter running v1.0-rc on a non-toy workload for ≥ 2 weeks
-
-**Experimental in v1.0** (in repo, opt-in, not part of the supported surface):
-
-- Kafka messaging (in-process queue is the supported default)
-- HashiCorp Vault secrets (env vars / Kubernetes secrets are the supported defaults)
-- GCE node provisioning (EC2 is the only supported provisioner)
-
-**Deferred:**
-
+### Deferred
 - Full CRIU-based VM checkpoint/restore → v1.1 (metadata-level lands in v1.0)
-- Azure deployment → v1.1+
-- Multi-region support → v2.0
+- Multi-region → not scheduled
 
-If the shipping criteria are not met by Q3 2026, the date slips. A v1.0 that means something is more valuable than a v1.0 that ships on schedule.
-
----
-
-## 🔐 Security
-
-Aether implements **defense in depth**:
-
-1. **Application**: Input validation, injection prevention, RBAC
-2. **Authentication**: JWT with short expiry, API key rotation
-3. **Multi-Tenancy**: Tenant isolation in all queries
-4. **Network**: TLS 1.3, VPC isolation (in production design)
-5. **VM Isolation**: Firecracker hardware virtualization
-6. **Infrastructure**: Encrypted at rest/transit, secrets management
-
-**Current State**: Security foundations complete (auth, validation, isolation design). Production hardening planned for beta.
+If the criteria aren't met by Q3 2026, the date slips. A v1.0 that means something beats a v1.0 that ships on time.
 
 ---
 
-## 🤝 Contributing
+## Security
 
-Contributions are welcome! This project is currently in pre-alpha and maintained by a solo developer.
+Aether layers its defenses:
 
-### How to Contribute
+1. **VM isolation**: Firecracker hardware virtualization for untrusted agent code
+2. **Multi-tenancy**: tenant checks on every API path; platform-level operations gated behind a distinct platform-admin role
+3. **Auth**: JWT (HS256/RS256, minimum 32-char secret enforced) plus API keys with RBAC
+4. **Application**: input validation, upload magic-byte checks, request-body size limits
+5. **Audit**: HMAC-chained audit log
 
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### Development Guidelines
-
-- Follow Go best practices (`go vet`, `golangci-lint`)
-- Write tests for new features (aim for 60%+ coverage)
-- Update documentation for user-facing changes
-- Run `go test -short ./...` before submitting PR
-
-### Priority Areas for Contributors
-
-- 🔴 **High Priority**: End-to-end integration, API endpoint implementation
-- 🟡 **Medium Priority**: CLI tool, observability integration
-- 🟢 **Low Priority**: Documentation improvements, test coverage
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ---
 
-## 📜 License
+## Contributing
 
-Aether is licensed under the **Apache License 2.0**.
+Contributions are welcome. This is a beta maintained by a solo developer.
 
-This means you can:
-- ✅ Use it commercially
-- ✅ Modify it
-- ✅ Distribute it
-- ✅ Use it privately
-
-You must:
-- 📄 Include the license and copyright notice
-- 📄 State significant changes made to the code
-
-See [LICENSE](LICENSE) for the full license text.
-
-**Why Apache 2.0?** Patent protection, enterprise-friendly, compatible with commercial use.
+1. Fork the repository
+2. Create a feature branch
+3. Write tests for new behavior
+4. Run `go test -short -race ./...` and `golangci-lint run` before opening a PR
 
 ---
 
-## 🙏 Acknowledgments
+## License
 
-- [Firecracker](https://firecracker-microvm.github.io/) - The microVM foundation
-- [etcd](https://etcd.io/) - Distributed consensus
-- [PostgreSQL](https://www.postgresql.org/) - Reliable data persistence
-- [Redis](https://redis.io/) - Fast caching and coordination
-- [OpenTelemetry](https://opentelemetry.io/) - Observability standards
+Apache License 2.0. See [LICENSE](LICENSE). Apache 2.0 gives patent protection and is friendly to commercial use.
 
 ---
 
-## 📞 Support
+## Acknowledgments
 
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/dnakitare/aether/issues)
-- **Questions**: Open a discussion on GitHub
+- [Firecracker](https://firecracker-microvm.github.io/) for the microVM foundation
+- [PostgreSQL](https://www.postgresql.org/) for durable state
+- [Redis](https://redis.io/) for rate limiting
+- [OpenTelemetry](https://opentelemetry.io/) for observability
 
 ---
 
-## 📈 Project Stats
+## Project stats
 
 - **Language**: Go 1.24
-- **Lines of Code**: ~48,000 (including tests)
-- **Test Coverage**: ~35% (targeting ≥ 70% on the in-scope v1.0 surface; see [docs/V1_SCOPE.md](docs/V1_SCOPE.md))
-- **Test Functions**: 400+
-- **Dependencies**: 30+ (see `go.mod`)
-- **Development Status**: Beta v0.2.0 (All core components integrated)
-- **Current Release**: v0.2.0-beta (April 2026)
-
----
-
-<div align="center">
-
-**Built for the AI agent ecosystem** 🚀
-
-[Architecture](docs/architecture/ARCHITECTURE.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
-
-**✨ Beta v0.2.0 — All core components integrated and functional.**
-
-**⚠️ Not yet recommended for production workloads. v1.0 targeting Q3 2026.**
-
-</div>
+- **Lines of code**: ~35,000 including tests
+- **Test functions**: 349
+- **Overall coverage**: ~53% (short mode); v1.0 target ≥ 70% on the supported surface
+- **Direct dependencies**: 21 (see `go.mod`)
+- **Status**: Beta v0.2.0, single-region. Not yet recommended for production.

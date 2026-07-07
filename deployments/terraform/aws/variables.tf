@@ -154,31 +154,6 @@ variable "redis_auth_token" {
   sensitive   = true
 }
 
-# Kafka Configuration
-variable "kafka_version" {
-  description = "Kafka version"
-  type        = string
-  default     = "3.5.1"
-}
-
-variable "kafka_num_brokers" {
-  description = "Number of Kafka brokers"
-  type        = number
-  default     = 3
-}
-
-variable "kafka_instance_type" {
-  description = "Kafka broker instance type"
-  type        = string
-  default     = "kafka.t3.small"
-}
-
-variable "kafka_volume_size" {
-  description = "Kafka broker volume size in GB"
-  type        = number
-  default     = 100
-}
-
 # Backup Configuration
 variable "backup_retention_days" {
   description = "Number of days to retain backups"

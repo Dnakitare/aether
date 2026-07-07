@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to Aether! We're excited to have you join our community building a modern AI agent runtime.
 
-**Project Status:** Beta v0.2.0 - All core components integrated with observability, deployment automation, and distributed scheduling
+**Project Status:** Beta v0.2.0 - single-region control plane with the core components integrated: HTTP API, in-process scheduler, PostgreSQL state, observability, and deployment automation
 
 ---
 
@@ -118,8 +118,8 @@ golangci-lint run
 ### Running Locally
 
 ```bash
-# 1. Start infrastructure (PostgreSQL, Redis, etcd)
-docker-compose -f deployments/docker/docker-compose.dev.yml up -d
+# 1. Start infrastructure (PostgreSQL, Redis)
+docker-compose up -d
 
 # Wait for services to be ready (5-10 seconds)
 sleep 5

@@ -29,7 +29,7 @@ Aether's performance testing framework consists of:
 Start the required services:
 
 ```bash
-# Start PostgreSQL, Redis, etcd, Kafka, Jaeger
+# Start PostgreSQL, Redis, Jaeger
 docker-compose -f deployments/docker/docker-compose.dev.yml up -d
 
 # Verify services are healthy
@@ -45,8 +45,6 @@ sleep 5
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/aether?sslmode=disable"
 export REDIS_ADDR="localhost:6379"
 export REDIS_PASSWORD="redis_dev_password"
-export ETCD_ENDPOINTS="localhost:2379"
-export KAFKA_BROKERS="localhost:9092"
 ```
 
 ### 3. System Resources

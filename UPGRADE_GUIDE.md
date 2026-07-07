@@ -33,9 +33,6 @@ Beta v0.2.0 is **backward compatible** with Alpha v0.1.0. The upgrade process is
 ```bash
 # PostgreSQL backup
 pg_dump -h localhost -U aether aether > aether_alpha_backup.sql
-
-# Or use aether CLI (if available)
-aether backup create --tag pre-beta-upgrade
 ```
 
 ### Configuration Backup

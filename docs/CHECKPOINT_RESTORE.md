@@ -732,4 +732,4 @@ func runCriticalOperation(
 
 **Last Updated**: February 15, 2026
 **Version**: Beta v0.2.0
-**Status**: Production Ready
+**Status**: Beta

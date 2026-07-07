@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 4 implements production-grade observability for Aether, including distributed tracing, metrics collection, centralized logging, cost tracking, and behavioral monitoring. This phase provides complete visibility into system behavior, performance, costs, and security.
+Phase 4 implements comprehensive observability for Aether, including distributed tracing, metrics collection, centralized logging, cost tracking, and behavioral monitoring. This phase provides complete visibility into system behavior, performance, costs, and security.
 
 ## New Components
 
@@ -254,7 +254,6 @@ services:
   promtail:     # Log shipping
   postgres:     # Audit logs & cost tracking
   redis:        # State persistence
-  vault:        # Secrets management
 ```
 
 ### Starting the Stack:
@@ -520,10 +519,8 @@ Phase 4 limitations (to be addressed in future phases):
 ## Next Steps (Phase 5)
 
 Phase 5 will add:
-- **Event-driven messaging**: Kafka for agent communication
 - **Rate limiting**: Token bucket algorithm with multi-tier enforcement
 - **Agent recovery**: Checkpointing and automatic restart
-- **Network routing**: Service mesh for agent-to-agent communication
 - **State management**: Enhanced Redis patterns for distributed operation
 
 ## Metrics Reference

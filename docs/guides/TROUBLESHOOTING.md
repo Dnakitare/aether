@@ -254,7 +254,7 @@ kubectl logs -n aether deployment/aether-scheduler | jq 'select(.component=="sch
 2. **Resource constraints**
    - Increase scheduler CPU/memory
    - Optimize placement algorithm
-   - Use distributed scheduler for >5K agents
+   - Add API server replicas behind the load balancer for higher agent counts
 
 ### Scheduling Failures
 

@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2025-12-05
 **Decision Makers**: Platform Architecture Team, SRE Team
-**Technical Story**: Production-grade observability with distributed tracing
+**Technical Story**: Comprehensive observability with distributed tracing
 
 ---
 
@@ -25,7 +25,7 @@ Aether needs comprehensive observability for:
 - Vendor-neutral (exportable to Jaeger, Prometheus, Datadog, etc.)
 - Automatic instrumentation where possible
 - Correlation IDs across all telemetry
-- Production-ready sampling strategies
+- Configurable sampling strategies
 
 ### Alternatives Considered
 

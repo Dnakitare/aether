@@ -87,7 +87,7 @@ go build -o aether ./cmd/aether
 For integration tests, start the backing services:
 
 ```bash
-# Start PostgreSQL, Redis, etcd
+# Start PostgreSQL, Redis
 docker-compose -f deployments/docker/docker-compose.dev.yml up -d
 
 # Wait for services to be ready (30 seconds)
@@ -100,7 +100,6 @@ docker-compose -f deployments/docker/docker-compose.dev.yml ps
 You should see:
 - PostgreSQL on port 5433
 - Redis on port 6380
-- etcd on port 2379
 
 ### Step 5: Run Tests
 
@@ -177,8 +176,6 @@ go test ./tests/chaos/...
 
 # Specific component comprehensive tests
 go test -v -run Comprehensive ./internal/scheduler/
-go test -v -run Comprehensive ./internal/backup/
-go test -v -run Comprehensive ./internal/ha/
 ```
 
 ### Test Coverage
@@ -240,8 +237,6 @@ aether/
 ├── internal/                # Private application code
 │   ├── api/                 # HTTP REST API (partial) 🚧
 │   ├── auth/                # JWT and API key auth ✅
-│   ├── backup/              # Backup/restore system ✅
-│   ├── ha/                  # High availability/leader election ✅
 │   ├── ratelimit/           # Rate limiting ✅
 │   ├── recovery/            # Checkpoint/restore (partial) 🚧
 │   ├── runtime/             # VM lifecycle management (partial) 🚧
@@ -273,7 +268,7 @@ Legend: ✅ Functional  🚧 Partial  ❌ Planned
 
 ### ✅ Fully Functional Components
 
-These components have comprehensive tests and are production-quality:
+These components have comprehensive tests and are stable in the beta build:
 
 1. **Scheduler** (`internal/scheduler/`)
    - Bin-packing, spread, best-fit placement strategies
@@ -301,27 +296,8 @@ These components have comprehensive tests and are production-quality:
    go test -v ./internal/ratelimit/ -run Comprehensive
    ```
 
-4. **High Availability** (`internal/ha/`)
-   - etcd-based leader election
-   - State replication
-   - Automatic failover
-   - 71% test coverage
-   ```bash
-   go test -v ./internal/ha/ -run Comprehensive
-   ```
-
-5. **Backup/Restore** (`internal/backup/`)
-   - PostgreSQL and Redis backup
-   - Point-in-time recovery
-   - Compression and verification
-   - 68% test coverage
-   ```bash
-   go test -v ./internal/backup/ -run Comprehensive
-   ```
-
-6. **State Store** (`internal/state/`)
+4. **State Store** (`internal/state/`)
    - Redis-backed state management
-   - Distributed locks
    - Key-value operations
    - 67% test coverage
    ```bash
@@ -341,7 +317,6 @@ These components exist but need integration work:
 - CLI commands (`./aether agent create`, etc.)
 - End-to-end agent workflow
 - Observability stack integration
-- Kafka messaging
 
 ---
 
@@ -349,7 +324,7 @@ These components exist but need integration work:
 
 ### Problem: Tests Fail with "connection refused"
 
-**Cause:** Infrastructure services (PostgreSQL, Redis, etcd) not running
+**Cause:** Infrastructure services (PostgreSQL, Redis) not running
 
 **Solution:**
 ```bash
@@ -375,7 +350,6 @@ docker-compose -f deployments/docker/docker-compose.dev.yml down
 # Check for processes on ports
 lsof -i :5433  # PostgreSQL
 lsof -i :6380  # Redis
-lsof -i :2379  # etcd
 
 # Kill if needed
 kill <PID>
@@ -432,7 +406,6 @@ go tool cover -func=coverage.out | grep total
 1. **Read the architecture docs:**
    - [Architecture Overview](architecture/ARCHITECTURE.md)
    - [ADR-001: Firecracker VMs](architecture/adr/001-firecracker-vms.md)
-   - [ADR-002: Distributed Scheduler](architecture/adr/002-distributed-scheduler.md)
 
 2. **Explore the codebase:**
    - Start with `internal/scheduler/scheduler.go` (most complete)
@@ -445,11 +418,11 @@ go tool cover -func=coverage.out | grep total
 
 ### For Production Deployment
 
-**Don't.** Aether is pre-alpha and not production-ready.
+**Don't.** Aether is beta software and not yet ready for production use.
 
 Wait for:
 - **Alpha release** (March 2026) - Basic end-to-end functionality
-- **Beta release** (April 2026) - Production-ready features
+- **Beta release** (April 2026) - Hardened core features
 - **v1.0 release** (Q3 2026) - Full production hardening
 
 See [PRODUCTION_DEPLOYMENT.md](deployment/PRODUCTION_DEPLOYMENT.md) for future plans.

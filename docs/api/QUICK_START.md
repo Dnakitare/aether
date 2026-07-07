@@ -269,7 +269,6 @@ chmod +x aether-demo.sh
 ### Try Advanced Features
 
 - **Auto-scaling:** Automatically scale agents based on load
-- **Secrets management:** Inject secrets from Vault
 - **Checkpointing:** Save and restore agent state
 - **Monitoring:** Set up metrics and alerts
 

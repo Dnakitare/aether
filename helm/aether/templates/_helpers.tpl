@@ -76,22 +76,6 @@ app.kubernetes.io/component: api-server
 {{- end }}
 
 {{/*
-Scheduler labels
-*/}}
-{{- define "aether.scheduler.labels" -}}
-{{ include "aether.labels" . }}
-app.kubernetes.io/component: scheduler
-{{- end }}
-
-{{/*
-Scheduler selector labels
-*/}}
-{{- define "aether.scheduler.selectorLabels" -}}
-{{ include "aether.selectorLabels" . }}
-app.kubernetes.io/component: scheduler
-{{- end }}
-
-{{/*
 Return the proper image name
 */}}
 {{- define "aether.image" -}}

@@ -62,9 +62,6 @@ Useful commands:
   # View API server logs
   kubectl logs -f -l app.kubernetes.io/component=api-server -n {{ .Release.Namespace }}
 
-  # View scheduler logs
-  kubectl logs -f -l app.kubernetes.io/component=scheduler -n {{ .Release.Namespace }}
-
   # Get all pods
   kubectl get pods -n {{ .Release.Namespace }}
 

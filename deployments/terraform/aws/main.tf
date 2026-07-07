@@ -1,5 +1,5 @@
 # AWS Infrastructure for Aether
-# Provisions VPC, EKS, RDS, ElastiCache, MSK, and supporting resources
+# Provisions VPC, EKS, RDS, ElastiCache, and supporting resources
 
 terraform {
   required_version = ">= 1.0"
@@ -199,99 +199,6 @@ resource "aws_elasticache_replication_group" "aether" {
   tags = {
     Name = "${var.cluster_name}-redis"
   }
-}
-
-# MSK (Managed Streaming for Apache Kafka)
-resource "aws_msk_configuration" "aether" {
-  name              = "${var.cluster_name}-kafka"
-  kafka_versions    = [var.kafka_version]
-  server_properties = <<PROPERTIES
-auto.create.topics.enable=true
-delete.topic.enable=true
-log.retention.hours=168
-compression.type=snappy
-PROPERTIES
-}
-
-resource "aws_security_group" "msk" {
-  name        = "${var.cluster_name}-msk"
-  description = "Security group for MSK"
-  vpc_id      = module.vpc.vpc_id
-
-  ingress {
-    from_port   = 9092
-    to_port     = 9092
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  ingress {
-    from_port   = 9094
-    to_port     = 9094
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.cluster_name}-msk"
-  }
-}
-
-resource "aws_msk_cluster" "aether" {
-  cluster_name           = var.cluster_name
-  kafka_version          = var.kafka_version
-  number_of_broker_nodes = var.kafka_num_brokers
-
-  broker_node_group_info {
-    instance_type   = var.kafka_instance_type
-    client_subnets  = module.vpc.private_subnet_ids
-    security_groups = [aws_security_group.msk.id]
-
-    storage_info {
-      ebs_storage_info {
-        volume_size = var.kafka_volume_size
-      }
-    }
-  }
-
-  encryption_info {
-    encryption_in_transit {
-      client_broker = "TLS"
-      in_cluster    = true
-    }
-
-    encryption_at_rest_kms_key_arn = aws_kms_key.aether.arn
-  }
-
-  configuration_info {
-    arn      = aws_msk_configuration.aether.arn
-    revision = aws_msk_configuration.aether.latest_revision
-  }
-
-  logging_info {
-    broker_logs {
-      cloudwatch_logs {
-        enabled   = true
-        log_group = aws_cloudwatch_log_group.msk.name
-      }
-    }
-  }
-
-  tags = {
-    Name = "${var.cluster_name}-kafka"
-  }
-}
-
-resource "aws_cloudwatch_log_group" "msk" {
-  name              = "/aws/msk/${var.cluster_name}"
-  retention_in_days = var.log_retention_days
 }
 
 # KMS Key for encryption

@@ -158,7 +158,7 @@ No direct command execution with user input detected.
 ### Priority: HIGH (Future)
 3. **Add Missing Security Components**
    - Audit logging implementation (currently no tests)
-   - Secrets management tests (vault integration)
+   - Secrets management tests (environment and cloud provider secret stores)
    - End-to-end security integration tests
 
 4. **Security Hardening**

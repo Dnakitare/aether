@@ -9,7 +9,7 @@
 > - ✅ Basic Terraform for AWS (VPC, networking, security baseline)
 > - 🚧 Auto-scaling groups, load balancers (in development)
 > - 🚧 Complete RDS and ElastiCache setup (partial)
-> - ❌ GCP and Azure deployments (planned for Q2 2026)
+> - ❌ Azure deployment (not supported; AWS and GCP only)
 > - ❌ Kubernetes manifests (planned)
 >
 > **For production deployments:**
@@ -28,12 +28,11 @@
 - [Architecture](#architecture)
 - [AWS Deployment](#aws-deployment)
 - [GCP Deployment](#gcp-deployment)
-- [Azure Deployment](#azure-deployment)
 - [Kubernetes Deployment](#kubernetes-deployment)
 - [Configuration](#configuration)
 - [Security](#security)
 - [Monitoring](#monitoring)
-- [Disaster Recovery](#disaster-recovery)
+- [Backup & Recovery](#backup--recovery)
 - [Scaling](#scaling)
 - [Troubleshooting](#troubleshooting)
 
@@ -41,9 +40,8 @@
 
 ## Overview
 
-This guide covers production deployment of Aether with:
-- **High Availability (HA):** Multi-zone deployment with automatic failover
-- **Disaster Recovery (DR):** Automated backups and point-in-time recovery
+This guide covers single-region production deployment of Aether with:
+- **Managed data services:** Multi-AZ PostgreSQL and Redis within one region
 - **Security:** TLS, secrets management, network isolation
 - **Observability:** Metrics, logs, and distributed tracing
 - **Scalability:** Auto-scaling from 10 to 10,000+ agents
@@ -63,8 +61,6 @@ This guide covers production deployment of Aether with:
 | **Control Plane** | 3 nodes | 3 nodes | For Aether services |
 | **Database** | Single instance | Multi-AZ | PostgreSQL 15+ |
 | **Cache** | Single instance | Multi-AZ | Redis 7+ |
-| **Message Queue** | Single instance | Multi-AZ cluster | Kafka 3.0+ |
-| **Consensus** | 3 nodes | 3-5 nodes | etcd 3.5+ |
 
 ### Resource Sizing
 
@@ -113,20 +109,12 @@ This guide covers production deployment of Aether with:
          │             │             │
     ┌────▼───┐   ┌────▼───┐   ┌────▼───┐
     │ API 1  │   │ API 2  │   │ API 3  │  ← Control Plane
-    │ (AZ-a) │   │ (AZ-b) │   │ (AZ-c) │
+    │ (AZ-a) │   │ (AZ-b) │   │ (AZ-c) │  (in-process scheduler)
     └────┬───┘   └────┬───┘   └────┬───┘
          │             │             │
          └─────────────┼─────────────┘
                        │
-         ┌─────────────┴─────────────┐
-         │                           │
-    ┌────▼────┐              ┌───────▼──────┐
-    │  Sch 1  │◄────────────►│   etcd       │
-    │  Sch 2  │  Leader      │  (3 nodes)   │
-    │  Sch 3  │  Election    └──────────────┘
-    └────┬────┘
-         │
-    ┌────▼─────────────────────────────┐
+    ┌──────────────────▼───────────────┐
     │     Compute Nodes (10-50+)       │
     │  ┌──────┐  ┌──────┐  ┌──────┐   │
     │  │Agent1│  │Agent2│  │Agent3│   │
@@ -145,13 +133,12 @@ This guide covers production deployment of Aether with:
 **API Servers (Stateless):**
 - Handle HTTP API requests
 - JWT authentication & authorization
-- Request routing to scheduler
+- Run the in-process scheduler (`aether server`)
 
-**Schedulers (Leader-follower):**
+**Scheduler (In-process):**
 - Agent placement decisions
 - Resource allocation
 - Node health monitoring
-- Only leader makes decisions
 
 **Compute Nodes (Workers):**
 - Run Firecracker microVMs
@@ -160,9 +147,8 @@ This guide covers production deployment of Aether with:
 - Local monitoring
 
 **Data Layer:**
-- PostgreSQL: Agent metadata, audit logs, backups
+- PostgreSQL: Agent metadata, audit logs
 - Redis: State cache, rate limiting, sessions
-- etcd: Leader election, distributed locks
 
 ---
 
@@ -316,17 +302,6 @@ redis:
   db: 0
   max_retries: 3
 
-etcd:
-  endpoints:
-    - "https://etcd-1.internal:2379"
-    - "https://etcd-2.internal:2379"
-    - "https://etcd-3.internal:2379"
-  tls:
-    enabled: true
-    cert_file: "/etc/aether/certs/client.crt"
-    key_file: "/etc/aether/certs/client.key"
-    ca_file: "/etc/aether/certs/ca.crt"
-
 auth:
   jwt_secret: "${JWT_SECRET}"  # From SSM Parameter Store
   token_duration: 1h
@@ -463,7 +438,6 @@ Expected response:
   "checks": {
     "database": "ok",
     "redis": "ok",
-    "etcd": "ok",
     "scheduler": "ok"
   }
 }
@@ -551,36 +525,6 @@ See `deployments/terraform/gcp/README.md` for detailed instructions.
 
 ---
 
-## Azure Deployment
-
-### Overview
-
-Using Azure services:
-- Virtual Machines
-- Azure Database for PostgreSQL
-- Azure Cache for Redis
-- AKS for Kubernetes (optional)
-- Application Gateway
-- Azure Monitor
-
-### Quick Start
-
-```bash
-cd deployments/terraform/azure
-
-# Configure
-cp terraform.tfvars.example terraform.tfvars
-
-# Deploy
-terraform init
-terraform plan
-terraform apply
-```
-
-See `deployments/terraform/azure/README.md` for detailed instructions.
-
----
-
 ## Kubernetes Deployment
 
 For Kubernetes-based deployment, see dedicated guides:
@@ -632,23 +576,11 @@ database:
   ssl_root_cert: "/etc/aether/certs/db-ca.crt"
 ```
 
-3. **etcd:**
-```yaml
-etcd:
-  tls:
-    enabled: true
-    cert_file: "/etc/aether/certs/etcd-client.crt"
-    key_file: "/etc/aether/certs/etcd-client.key"
-    ca_file: "/etc/aether/certs/etcd-ca.crt"
-```
-
 ### Secrets Management
 
 Use a secrets manager:
 - AWS: Systems Manager Parameter Store or Secrets Manager
 - GCP: Secret Manager
-- Azure: Key Vault
-- HashiCorp Vault
 
 **Example with AWS Secrets Manager:**
 ```bash
@@ -673,7 +605,6 @@ Control Plane:
   - Allow 443 (HTTPS) from ALB
   - Allow 8080 from ALB
   - Allow 22 (SSH) from bastion only
-  - Allow 2379-2380 (etcd) from control plane nodes
 
 Compute Nodes:
   - Allow 22 (SSH) from bastion only
@@ -753,7 +684,6 @@ All logs are in JSON format for easy parsing:
 **Log Aggregation:**
 - AWS: CloudWatch Logs Insights
 - GCP: Cloud Logging
-- Azure: Azure Monitor
 - Self-hosted: ELK Stack or Loki
 
 **Useful Log Queries:**
@@ -790,69 +720,39 @@ fields @timestamp, path, duration_ms
 
 ---
 
-## Disaster Recovery
+## Backup & Recovery
+
+Aether runs single-region. Durability relies on the managed data services rather than
+an application-level backup subsystem.
 
 ### Backup Strategy
 
-**Automated Backups:**
-```yaml
-backup:
-  enabled: true
-  schedule: "0 */6 * * *"  # Every 6 hours
-  retention_days: 30
-  compression: true
-  storage:
-    type: "s3"
-    bucket: "aether-backups-production"
-    prefix: "backups/"
-```
+- **PostgreSQL:** Enable managed automated backups and snapshots (RDS/Cloud SQL). Set a
+  retention window (for example 30 days) and enable point-in-time recovery.
+- **Redis:** Enable managed snapshots (ElastiCache/Memorystore) for cache and session state.
+- **Configuration:** Keep config files and Terraform state in version control and object
+  storage (S3/GCS).
 
-**What's Backed Up:**
-- Database (PostgreSQL): Schema + data
-- Redis state: Agent state, cache
-- Configuration: All config files
-- Secrets: References (not values)
-
-**Backup Testing:**
+**Example (AWS RDS automated backups):**
 ```bash
-# Restore to staging environment monthly
-aether backup restore \
-  --backup-id "backup-20260209-100000" \
-  --target-environment "staging"
+aws rds modify-db-instance \
+  --db-instance-identifier "aether-db" \
+  --backup-retention-period 30 \
+  --apply-immediately
 ```
 
 ### RTO & RPO
 
-**Recovery Time Objective (RTO):** < 15 minutes
-**Recovery Point Objective (RPO):** < 6 hours
+**Recovery Time Objective (RTO):** < 30 minutes (restore from latest snapshot)
+**Recovery Point Objective (RPO):** determined by the managed backup interval
 
-**DR Procedure:**
+**Recovery Procedure:**
 
 1. **Detect failure** (automatic via health checks)
-2. **Failover to secondary region** (automatic via Route53/Traffic Manager)
-3. **Restore from backup** (if needed)
+2. **Restore the database** from the latest managed snapshot
+3. **Redeploy the API tier** (Terraform / ASG)
 4. **Verify services** (automated smoke tests)
-5. **Update DNS** (if manual failover needed)
-
-### Multi-Region Setup
-
-For critical workloads, deploy to multiple regions:
-
-```
-Primary: us-east-1
-Secondary: us-west-2
-DR: eu-west-1
-```
-
-**Active-Passive:**
-- Primary handles all traffic
-- Secondary is warm standby
-- Automatic failover via health checks
-
-**Active-Active:**
-- Both regions handle traffic
-- Global load balancing
-- Cross-region replication
+5. **Update DNS** if the load balancer endpoint changed
 
 ---
 

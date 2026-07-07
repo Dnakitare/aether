@@ -77,22 +77,6 @@ output "redis_secret_arn" {
   value       = aws_secretsmanager_secret.redis.arn
 }
 
-# Kafka Outputs
-output "kafka_bootstrap_brokers" {
-  description = "MSK bootstrap brokers"
-  value       = aws_msk_cluster.aether.bootstrap_brokers_tls
-}
-
-output "kafka_zookeeper_connect" {
-  description = "MSK Zookeeper connection string"
-  value       = aws_msk_cluster.aether.zookeeper_connect_string
-}
-
-output "kafka_cluster_arn" {
-  description = "MSK cluster ARN"
-  value       = aws_msk_cluster.aether.arn
-}
-
 # S3 Outputs
 output "backup_bucket_name" {
   description = "S3 bucket name for backups"
@@ -138,9 +122,6 @@ output "connection_info" {
     redis = {
       host = aws_elasticache_replication_group.aether.primary_endpoint_address
       port = 6379
-    }
-    kafka = {
-      brokers = aws_msk_cluster.aether.bootstrap_brokers_tls
     }
     backup = {
       bucket = aws_s3_bucket.backups.id

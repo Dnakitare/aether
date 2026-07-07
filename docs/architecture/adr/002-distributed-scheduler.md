@@ -1,6 +1,8 @@
 # ADR-002: Distributed Scheduler with Leader Election
 
-**Status**: Accepted
+> Superseded 2026-07: the distributed scheduler / Kafka / etcd / Vault path was removed; Aether is single-region. See CHANGELOG.
+
+**Status**: Superseded (2026-07)
 **Date**: 2025-12-15
 **Decision Makers**: Platform Architecture Team
 **Technical Story**: Scale beyond 1,000 agents requires distributed scheduler

@@ -103,7 +103,7 @@ Aether needs to execute arbitrary user code in a multi-tenant environment. Key r
 ✅ **Strong Security**: Hardware-level isolation meets compliance requirements (SOC 2, HIPAA)
 ✅ **Cost Efficiency**: 10x higher density than traditional VMs
 ✅ **Fast User Experience**: Sub-second agent startup
-✅ **Production Ready**: Proven at massive scale (AWS Lambda)
+✅ **Battle-Tested**: Firecracker is proven at massive scale (AWS Lambda)
 ✅ **Simple Operations**: Single binary, minimal dependencies
 
 ### Negative

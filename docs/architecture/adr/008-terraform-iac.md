@@ -9,13 +9,13 @@
 
 ## Context
 
-Aether requires infrastructure provisioning across multiple environments (dev, staging, production) and cloud providers (AWS, GCP, Azure). Key requirements:
+Aether requires infrastructure provisioning across multiple environments (dev, staging, production) and cloud providers (AWS, GCP). Key requirements:
 
 1. **Repeatability**: Identical infrastructure across environments
 2. **Version Control**: Track infrastructure changes like code
 3. **Auditability**: Who changed what, when, and why
 4. **Automation**: CI/CD pipeline integration
-5. **Multi-Cloud**: Support AWS, GCP, Azure
+5. **Multi-Cloud**: Support AWS, GCP
 6. **State Management**: Shared state, locking, encryption
 
 ### Manual Provisioning Problems
@@ -89,10 +89,10 @@ Aether requires infrastructure provisioning across multiple environments (dev, s
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Cloud Resources                           │
-│  AWS / GCP / Azure                                               │
+│  AWS / GCP                                                       │
 │  ├─ VPC, Subnets, Security Groups                               │
 │  ├─ EC2 Instances, Auto Scaling Groups                          │
-│  ├─ RDS, ElastiCache, etcd                                      │
+│  ├─ RDS, ElastiCache                                            │
 │  ├─ Load Balancers, Route 53                                    │
 │  └─ IAM Roles, S3 Buckets, CloudWatch                           │
 └─────────────────────────────────────────────────────────────────┘
@@ -418,7 +418,7 @@ jobs:
 ✅ **Repeatability**: Identical envs via `terraform apply`
 ✅ **Auditability**: Git history shows who, what, when, why
 ✅ **Automation**: CI/CD pipeline integration
-✅ **Multi-Cloud**: Same tool for AWS, GCP, Azure
+✅ **Multi-Cloud**: Same tool for AWS, GCP
 ✅ **Plan Before Apply**: Preview changes before execution
 ✅ **Idempotent**: Safe to run multiple times
 ✅ **Rollback**: Revert to previous state via Git + `terraform apply`
@@ -429,7 +429,7 @@ jobs:
 ❌ **Learning Curve**: HCL syntax, Terraform concepts
 ❌ **State Drift**: Manual changes cause drift (mitigated by CI/CD)
 ❌ **Slow Feedback**: Plan/apply can take 5-10 minutes
-❌ **Secrets Management**: Sensitive values require separate system (Parameter Store, Vault)
+❌ **Secrets Management**: Sensitive values require separate system (Parameter Store)
 
 ### Neutral
 

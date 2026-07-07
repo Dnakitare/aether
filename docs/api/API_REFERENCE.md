@@ -692,7 +692,6 @@ GET /readiness
   "checks": {
     "database": "ok",
     "redis": "ok",
-    "etcd": "ok",
     "scheduler": "ok"
   },
   "timestamp": "2026-02-09T10:00:00Z"

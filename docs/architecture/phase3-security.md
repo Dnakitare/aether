@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 3 hardens Aether for production multi-tenant deployments with network isolation, secrets management, audit logging, API key authentication, and state persistence.
+Phase 3 hardens Aether for multi-tenant deployments with network isolation, audit logging, API key authentication, and state persistence.
 
 ## New Components
 
@@ -37,40 +37,7 @@ Base Subnet: 10.0.0.0/16
 {Action: FirewallAllow, Protocol: "tcp", DestPort: 443, Direction: Outbound}
 ```
 
-### 2. Secrets Management (`internal/secrets/vault.go`)
-
-HashiCorp Vault integration for secure secrets storage.
-
-#### Key Features:
-- **KV v2 engine**: Versioned secrets with metadata
-- **Per-tenant isolation**: Secrets namespaced by tenant ID
-- **Secret injection**: Automatic injection into agent environments
-- **Secret rotation**: Rotate secrets with backup of old values
-- **Audit trail**: All secret operations logged
-
-#### Vault Path Structure:
-```
-secret/
-  ├─> tenant-1/
-  │   ├─> DATABASE_URL
-  │   ├─> API_KEY
-  │   └─> PRIVATE_KEY
-  └─> tenant-2/
-      └─> ...
-```
-
-#### Secret Injection Flow:
-```
-AgentConfig.Secrets = ["DATABASE_URL", "API_KEY"]
-  |
-  └─> VaultManager.InjectSecrets()
-        |
-        └─> For each secret:
-              ├─> Vault.Get(tenant_id, secret_key)
-              └─> AgentConfig.Env[secret_key] = value
-```
-
-### 3. Audit Logging (`internal/audit/`)
+### 2. Audit Logging (`internal/audit/`)
 
 Immutable audit trail in PostgreSQL.
 
@@ -127,7 +94,7 @@ CREATE INDEX idx_audit_logs_action ON audit_logs (action);
 }
 ```
 
-### 4. API Key Management (`internal/auth/apikey.go`)
+### 3. API Key Management (`internal/auth/apikey.go`)
 
 Service account authentication with API keys.
 
@@ -173,7 +140,7 @@ newKey, newAPIKey, err := manager.RotateKey(ctx, tenantID, oldKeyID, ttl)
 err := manager.RevokeKey(ctx, tenantID, keyID)
 ```
 
-### 5. State Persistence (`internal/state/redis.go`)
+### 4. State Persistence (`internal/state/redis.go`)
 
 Redis-backed state persistence for distributed operation.
 
@@ -222,9 +189,8 @@ Aether implements multiple security layers:
 1. **Network Layer**: Tenant isolation with firewall rules
 2. **Authentication Layer**: JWT + API keys
 3. **Authorization Layer**: RBAC with fine-grained permissions
-4. **Secrets Layer**: Vault for sensitive data
-5. **Audit Layer**: Immutable logging of all operations
-6. **State Layer**: Encrypted Redis connections (TLS)
+4. **Audit Layer**: Immutable logging of all operations
+5. **State Layer**: Encrypted Redis connections (TLS)
 
 ### Multi-Tenant Isolation
 
@@ -235,7 +201,6 @@ Aether implements multiple security layers:
 │  │ Agent A  │  │ Agent B  │            │
 │  └──────────┘  └──────────┘            │
 │  Network: 10.0.0.0/24                  │
-│  Secrets: secret/tenant-1/*            │
 │  Quota: 10 agents, 100 cores           │
 └─────────────────────────────────────────┘
 
@@ -245,13 +210,11 @@ Aether implements multiple security layers:
 │  │ Agent C  │  │ Agent D  │            │
 │  └──────────┘  └──────────┘            │
 │  Network: 10.0.1.0/24                  │
-│  Secrets: secret/tenant-2/*            │
 │  Quota: 50 agents, 500 cores           │
 └─────────────────────────────────────────┘
 
 Complete isolation:
 - Network traffic cannot cross tenant boundaries
-- Secrets are isolated by tenant namespace
 - Quotas enforced per-tenant
 - Audit logs track all tenant operations
 ```
@@ -279,9 +242,6 @@ if err := auth.CheckPermission(claims, auth.PermissionAgentCreate); err != nil {
 ### Runtime Integration
 
 ```go
-// Inject secrets before starting agent
-vaultManager.InjectSecrets(ctx, &agentConfig)
-
 // Save state to Redis
 redisStore.SaveAgentState(ctx, agentInfo)
 
@@ -290,16 +250,6 @@ network, _ := networkManager.CreateTenantNetwork(ctx, tenantID)
 ```
 
 ## Configuration
-
-### Vault Configuration
-```go
-secrets.Config{
-    Address:   "http://vault:8200",
-    Token:     "vault-token",
-    MountPath: "secret",
-    KVVersion: 2,
-}
-```
 
 ### PostgreSQL Configuration
 ```go
@@ -337,7 +287,6 @@ networkManager, _ := tenant.NewNetworkIsolationManager(
 - API key management: 100%
 - State persistence: Integration tests (requires Redis)
 - Audit logging: Unit tests (mocked DB)
-- Vault integration: Unit tests (mocked client)
 
 ### Security Testing
 
@@ -345,7 +294,6 @@ networkManager, _ := tenant.NewNetworkIsolationManager(
 # Unit tests
 go test ./internal/tenant/... -v
 go test ./internal/auth/... -v
-go test ./internal/secrets/... -v
 go test ./internal/audit/... -v
 
 # Integration tests (requires Redis)
@@ -361,11 +309,6 @@ make security-scan
 - Subnet allocation: O(n) where n = number of existing tenants
 - Firewall rule lookup: O(rules) per packet
 - Memory overhead: ~1KB per tenant network
-
-### Secrets Management
-- Vault GET: ~10-50ms (network latency)
-- Vault PUT: ~10-50ms (network latency)
-- Caching recommended for frequently accessed secrets
 
 ### Audit Logging
 - Write throughput: >10,000 events/sec (PostgreSQL)
@@ -383,21 +326,11 @@ make security-scan
 Phase 3 limitations (addressed in future phases):
 
 - **Network enforcement**: Firewall rules are logical, not enforced at kernel level
-- **Vault HA**: Single Vault instance, no HA configuration
 - **Audit log encryption**: Logs stored unencrypted in PostgreSQL
 - **Redis clustering**: Single Redis instance, no clustering
 - **Secret caching**: No local secret caching layer
 
 ## Best Practices
-
-### Secrets Management
-```go
-// ✓ DO: Use Vault for all sensitive data
-vaultManager.SetSecret(ctx, tenantID, "DB_PASSWORD", password)
-
-// ✗ DON'T: Store secrets in environment variables directly
-config.Env["DB_PASSWORD"] = "hardcoded-password" // BAD!
-```
 
 ### Audit Logging
 ```go

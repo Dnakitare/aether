@@ -87,17 +87,6 @@ helm install aether ./helm/aether \
 | `apiServer.autoscaling.minReplicas` | Min replicas | `2` |
 | `apiServer.autoscaling.maxReplicas` | Max replicas | `10` |
 
-### Scheduler
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `scheduler.enabled` | Enable scheduler | `true` |
-| `scheduler.replicaCount` | Number of replicas | `1` |
-| `scheduler.persistence.enabled` | Enable persistence | `true` |
-| `scheduler.persistence.size` | Volume size | `10Gi` |
-| `scheduler.resources.limits.cpu` | CPU limit | `500m` |
-| `scheduler.resources.limits.memory` | Memory limit | `1024Mi` |
-
 ### PostgreSQL
 
 | Parameter | Description | Default |
@@ -161,16 +150,6 @@ apiServer:
   podDisruptionBudget:
     enabled: true
     minAvailable: 2
-
-scheduler:
-  persistence:
-    enabled: true
-    size: 50Gi
-
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 2048Mi
 
 postgresql:
   enabled: true
@@ -254,10 +233,6 @@ apiServer:
       cpu: 500m
       memory: 1024Mi
 
-scheduler:
-  persistence:
-    enabled: false
-
 postgresql:
   enabled: true
   primary:
@@ -308,9 +283,6 @@ kubectl get pods -n aether
 ```bash
 # API server logs
 kubectl logs -f -l app.kubernetes.io/component=api-server -n aether
-
-# Scheduler logs
-kubectl logs -f -l app.kubernetes.io/component=scheduler -n aether
 ```
 
 ### Debug Pod Issues

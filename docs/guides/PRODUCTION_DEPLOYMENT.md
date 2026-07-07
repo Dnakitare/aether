@@ -35,16 +35,18 @@ Before deploying Aether to production, ensure you have:
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | **API Server** | 2 vCPU, 4GB RAM | 4 vCPU, 8GB RAM |
-| **Scheduler** | 2 vCPU, 4GB RAM | 4 vCPU, 8GB RAM |
 | **PostgreSQL** | 2 vCPU, 4GB RAM, 100GB SSD | 4 vCPU, 16GB RAM, 500GB SSD |
 | **Redis** | 2 vCPU, 2GB RAM | 4 vCPU, 8GB RAM |
 | **Storage** | 100GB | 1TB+ |
 
 ### Scaling Guidelines
 
-- **1,000 agents**: 2 API servers, 1 scheduler
-- **5,000 agents**: 4 API servers, 2 schedulers
-- **10,000+ agents**: Scale horizontally, use distributed scheduler
+Aether runs single-region with an in-process scheduler (`aether server`). Scale by
+adding API server replicas behind a load balancer:
+
+- **1,000 agents**: 2 API server replicas
+- **5,000 agents**: 4 API server replicas
+- **10,000+ agents**: Scale API replicas horizontally behind the load balancer
 
 ## Deployment Options
 
@@ -167,13 +169,6 @@ apiServer:
     limits:
       cpu: 4000m
       memory: 8Gi
-
-scheduler:
-  replicaCount: 2
-  persistence:
-    enabled: true
-    size: 50Gi
-    storageClass: fast-ssd
 
 postgresql:
   enabled: true
@@ -450,22 +445,8 @@ kubectl create secret generic aether-secrets \
 
 ## High Availability
 
-### Multi-Region Setup
-
-```hcl
-# Terraform multi-region
-module "primary_region" {
-  source = "./modules"
-  region = "us-east-1"
-  # ... configuration
-}
-
-module "secondary_region" {
-  source = "./modules"
-  region = "us-west-2"
-  # ... configuration
-}
-```
+Aether is single-region. Within a region, run multiple API server replicas
+behind a load balancer and rely on managed database and cache high availability.
 
 ### Database Replication
 
@@ -547,37 +528,35 @@ groups:
 
 ## Backup & Recovery
 
-### Automated Backups
+State lives in PostgreSQL, so recovery relies on your managed database backups
+rather than an in-app backup subsystem.
+
+### Database Backups
 
 ```bash
-# Schedule daily backups
-aether backup create --schedule "0 2 * * *"
+# AWS RDS: automated daily snapshots (retention set via db_backup_retention)
+aws rds create-db-snapshot \
+  --db-instance-identifier aether-postgres \
+  --db-snapshot-identifier aether-manual-$(date +%Y%m%d)
 
-# Configure retention
-aether backup cleanup --retention-days 30
+# GCP Cloud SQL: on-demand backup
+gcloud sql backups create --instance=aether-postgres
 ```
 
-### Disaster Recovery
+Restore by provisioning a new database instance from the snapshot and pointing
+`AETHER_DB_HOST` at it.
+
+### Agent Checkpoints
+
+Agent-level checkpoint and restore is available through the CLI:
 
 ```bash
-# Initiate failover
-aether dr failover --to secondary-region
+# Create a checkpoint for an agent
+aether checkpoint create <agent-id>
 
-# Test DR readiness
-aether dr test-failover
-```
-
-### Restore Process
-
-```bash
-# List available backups
-aether backup list
-
-# Restore from backup
-aether restore --backup-id backup-20260215-120000
-
-# Verify restore
-aether verify --backup-id backup-20260215-120000
+# List and restore checkpoints
+aether checkpoint list <agent-id>
+aether checkpoint restore <agent-id>
 ```
 
 ## Troubleshooting
@@ -588,7 +567,6 @@ See the [Troubleshooting Guide](./TROUBLESHOOTING.md) for common issues and solu
 
 - Configure [Observability](./OBSERVABILITY.md)
 - Review [Security Best Practices](./SECURITY.md)
-- Set up [Disaster Recovery](./DISASTER_RECOVERY.md)
 
 ## Support
 

@@ -1,6 +1,8 @@
 # ADR-007: Multi-AZ Deployment Strategy
 
-**Status**: Accepted
+> Superseded 2026-07: the distributed scheduler / Kafka / etcd / Vault path was removed; Aether is single-region. See CHANGELOG.
+
+**Status**: Superseded (2026-07)
 **Date**: 2025-12-10
 **Decision Makers**: Platform Architecture Team, SRE Team
 **Technical Story**: High availability with 99.9% uptime SLA

@@ -114,20 +114,6 @@ services:
     networks:
       - aether
 
-  # Vault - Secrets Management
-  vault:
-    image: hashicorp/vault:1.15
-    container_name: aether-vault
-    ports:
-      - "8200:8200"
-    environment:
-      - VAULT_DEV_ROOT_TOKEN_ID=root
-      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
-    cap_add:
-      - IPC_LOCK
-    networks:
-      - aether
-
 volumes:
   prometheus-data:
   grafana-data:

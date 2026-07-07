@@ -1,15 +1,13 @@
-# Aether Multi-Cloud Terraform Modules
+# Aether Terraform Modules (AWS + GCP)
 
-Infrastructure as Code for deploying Aether across AWS, GCP, Azure, and on-premise environments.
+Infrastructure as Code for deploying Aether on AWS and GCP.
 
 ## Overview
 
-This directory contains Terraform modules for deploying Aether's infrastructure across multiple cloud providers:
+This directory contains Terraform modules for deploying Aether's infrastructure:
 
-- **AWS** - VPC, EKS (optional), RDS PostgreSQL, ElastiCache Redis, MSK Kafka
-- **GCP** - VPC, GKE (optional), Cloud SQL, Memorystore Redis, Pub/Sub
-- **Azure** - VNet, AKS (optional), Azure Database, Azure Cache, Event Hubs
-- **On-Premise** - Networking, storage, compute resources
+- **AWS** - VPC, EKS (optional), RDS PostgreSQL, ElastiCache Redis
+- **GCP** - VPC, GKE (optional), Cloud SQL, Memorystore Redis
 
 ## Quick Start
 
@@ -83,10 +81,10 @@ terraform apply
 │  │ Private AZ-A │  │ Private AZ-B │  │ Private AZ-C │    │
 │  │  10.0.11.0   │  │  10.0.12.0   │  │  10.0.13.0   │    │
 │  │              │  │              │  │              │    │
-│  │  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │    │
-│  │  │  RDS   │  │  │  │  MSK   │  │  │  │ Redis  │  │    │
-│  │  │Postgres│  │  │  │ Kafka  │  │  │  │ElastiCache  │    │
-│  │  └────────┘  │  │  └────────┘  │  │  └────────┘  │    │
+│  │  ┌────────┐  │  │              │  │  ┌────────┐  │    │
+│  │  │  RDS   │  │  │              │  │  │ Redis  │  │    │
+│  │  │Postgres│  │  │              │  │  │ElastiCache  │    │
+│  │  └────────┘  │  │              │  │  └────────┘  │    │
 │  └──────────────┘  └──────────────┘  └──────────────┘    │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -138,8 +136,6 @@ postgres_instance_class = "db.t3.micro"
 postgres_multi_az       = false
 redis_node_type         = "cache.t3.micro"
 redis_num_nodes         = 1
-kafka_instance_type     = "kafka.t3.small"
-kafka_num_brokers       = 1
 single_nat_gateway      = true
 ```
 
@@ -163,8 +159,6 @@ postgres_instance_class = "db.r6g.xlarge"
 postgres_multi_az       = true
 redis_node_type         = "cache.r6g.large"
 redis_num_nodes         = 3
-kafka_instance_type     = "kafka.m5.large"
-kafka_num_brokers       = 3
 single_nat_gateway      = false
 ```
 
@@ -197,7 +191,7 @@ postgres_password = "secure-password"
 redis_auth_token  = "secure-token"
 ```
 
-**Option 3: Secrets Manager/Vault**
+**Option 3: AWS Secrets Manager**
 ```bash
 # Fetch from AWS Secrets Manager
 export TF_VAR_postgres_password=$(aws secretsmanager get-secret-value \
@@ -275,7 +269,6 @@ resource "aws_s3_bucket_replication_configuration" "backups" {
 Key metrics to monitor:
 - RDS: `DatabaseConnections`, `CPUUtilization`, `FreeStorageSpace`
 - ElastiCache: `CurrConnections`, `CPUUtilization`, `BytesUsedForCache`
-- MSK: `BytesInPerSec`, `BytesOutPerSec`, `UnderReplicatedPartitions`
 
 ### Cloud Monitoring (GCP)
 
@@ -389,10 +382,8 @@ terraform/
 │   ├── main.tf
 │   ├── variables.tf
 │   └── outputs.tf
-├── azure/                  # Azure-specific resources (placeholder)
-├── on-premise/             # On-premise deployment (placeholder)
 └── modules/                # Reusable modules
-    ├── networking/         # VPC/VNet module
+    ├── networking/         # VPC module
     └── kubernetes/         # K8s cluster module (placeholder)
 ```
 

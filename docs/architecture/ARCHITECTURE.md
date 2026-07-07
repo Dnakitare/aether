@@ -23,14 +23,13 @@
 
 ## Overview
 
-Aether is a production-grade AI agent runtime built on **Firecracker microVMs**, designed for secure multi-tenant execution of arbitrary workloads with strong isolation, resource control, and high availability.
+Aether is an AI agent runtime built on **Firecracker microVMs**, designed for secure multi-tenant execution of arbitrary workloads with strong isolation and resource control. It runs as a single-region control plane.
 
 ### Key Characteristics
 
 - **Secure Isolation**: Each agent runs in its own Firecracker microVM with hardware-level isolation
 - **Multi-Tenant**: Complete tenant isolation at all layers (compute, network, data)
-- **Scalable**: Distributed scheduler supports 10,000+ concurrent agents across multiple nodes
-- **Highly Available**: Leader-follower architecture with automatic failover
+- **Efficient**: In-process scheduler with best-fit bin packing and sub-second VM startup
 - **Observable**: Comprehensive metrics, logging, and distributed tracing
 - **Cloud Native**: Kubernetes-ready with health checks, graceful shutdown, and rolling deployments
 
@@ -54,41 +53,27 @@ Aether is a production-grade AI agent runtime built on **Firecracker microVMs**,
 │                  (TLS Termination, WAF, DDoS Protection)            │
 └────────────────────────────┬────────────────────────────────────────┘
                              │
-            ┌────────────────┼────────────────┐
-            │                │                │
-   ┌────────▼──────┐  ┌─────▼──────┐  ┌─────▼──────┐
-   │  API Server 1  │  │ API Server 2│  │ API Server 3│
-   │  (Stateless)   │  │ (Stateless) │  │ (Stateless) │
-   └────────┬───────┘  └──────┬──────┘  └──────┬──────┘
-            │                 │                 │
-            └─────────────────┼─────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-    ┌────▼────┐         ┌────▼────┐         ┌────▼────┐
-    │Scheduler│         │Scheduler│         │Scheduler│
-    │ (Leader)│────────▶│(Follower)│────────▶│(Follower)│
-    └────┬────┘         └─────────┘         └─────────┘
-         │
-         │ Placement
-         │ Decisions
-         │
-    ┌────▼──────────────────────────────────────────┐
-    │         Compute Node Pool (10-50+ nodes)      │
-    │  ┌─────────┐  ┌─────────┐  ┌─────────┐       │
-    │  │ Node 1  │  │ Node 2  │  │ Node N  │       │
-    │  │┌───┐┌───┐│ │┌───┐┌───┐│ │┌───┐┌───┐│      │
-    │  ││VM1││VM2││ ││VM3││VM4││ ││VM ││VM ││      │
-    │  │└───┘└───┘│ │└───┘└───┘│ │└───┘└───┘│      │
-    │  └─────────┘  └─────────┘  └─────────┘       │
+                    ┌────────▼────────┐
+                    │   API Server     │
+                    │  (Stateless)     │
+                    │  ┌────────────┐  │
+                    │  │ Scheduler  │  │  (in-process, best-fit bin packing)
+                    │  └────────────┘  │
+                    └────────┬─────────┘
+                             │ Placement
+                             ▼
+    ┌───────────────────────────────────────────────┐
+    │                Compute Host                    │
+    │  ┌───┐┌───┐┌───┐┌───┐                          │
+    │  │VM1││VM2││VM3││VM4│  (Firecracker microVMs)  │
+    │  └───┘└───┘└───┘└───┘                          │
     └───────────────────────────────────────────────┘
                          │
-         ┌───────────────┼───────────────┐
-         │               │               │
-    ┌────▼────┐    ┌────▼────┐    ┌────▼────┐
-    │PostgreSQL│    │  Redis  │    │  etcd   │
-    │(Multi-AZ)│    │(Multi-AZ)│    │(Cluster)│
-    └─────────┘    └─────────┘    └─────────┘
+              ┌──────────┴──────────┐
+              │                     │
+         ┌────▼────┐          ┌─────▼───┐
+         │PostgreSQL│          │  Redis  │
+         └─────────┘          └─────────┘
 ```
 
 ### Component Layers
@@ -96,10 +81,10 @@ Aether is a production-grade AI agent runtime built on **Firecracker microVMs**,
 | Layer | Components | Purpose |
 |-------|-----------|---------|
 | **Edge** | Load Balancer, WAF | Traffic routing, security, TLS |
-| **API** | API Servers | RESTful API, authentication, validation |
-| **Control Plane** | Schedulers | Placement decisions, lifecycle management |
-| **Compute** | Compute Nodes | VM execution, resource management |
-| **Data** | PostgreSQL, Redis, etcd | State persistence, caching, coordination |
+| **API** | API Server | RESTful API, authentication, validation |
+| **Control Plane** | In-process Scheduler | Placement decisions, lifecycle management |
+| **Compute** | Compute Host | VM execution, resource management |
+| **Data** | PostgreSQL, Redis | State persistence, caching |
 | **Observability** | Prometheus, Jaeger, Loki | Metrics, traces, logs |
 
 ---
@@ -139,21 +124,20 @@ type Runtime interface {
 **Location**: `internal/scheduler/`
 
 **Responsibilities**:
-- Placement decisions (which node to place agent on)
+- Placement decisions (which host to place agent on)
 - Resource capacity tracking
 - Node health monitoring
 - Work queue management
-- Leader election via etcd
 
 **Architecture**:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                 Scheduler Leader                         │
+│                 In-Process Scheduler                     │
 │                                                          │
 │  ┌──────────────┐    ┌──────────────┐                  │
 │  │  Work Queue  │───▶│   Placement  │                  │
-│  │   (Kafka)    │    │   Algorithm  │                  │
+│  │  (in-memory) │    │   Algorithm  │                  │
 │  └──────────────┘    └──────┬───────┘                  │
 │                              │                           │
 │  ┌──────────────┐    ┌──────▼───────┐                  │
@@ -166,13 +150,8 @@ type Runtime interface {
 **Placement Algorithm**:
 - **Strategy**: Best-fit bin packing
 - **Criteria**: CPU, memory, available slots
-- **Affinity**: Anti-affinity for same-tenant VMs (spread across nodes)
+- **Affinity**: Anti-affinity for same-tenant VMs (spread across hosts)
 - **Fallback**: Round-robin if resource utilization similar
-
-**High Availability**:
-- **Leader Election**: Raft-based via etcd with 5s lease
-- **Failover**: <10s automatic failover on leader failure
-- **State Sync**: All nodes maintain read-only copy of cluster state
 
 ### 3. Runtime Manager
 
@@ -341,43 +320,7 @@ Redis (Cache + Locks):
 | Pro | 1,000 | 200 | $99 |
 | Enterprise | 10,000 | 2,000 | Custom |
 
-### 8. High Availability
-
-**Location**: `internal/ha/`
-
-**Responsibilities**:
-- Leader election for schedulers
-- Automatic failover on leader failure
-- State replication
-- Split-brain prevention
-
-**Leader Election**:
-- **Mechanism**: etcd lease with TTL
-- **Campaign**: On startup, attempt to acquire `/aether/scheduler/leader` key
-- **Heartbeat**: Renew lease every 2s (lease TTL: 5s)
-- **Resignation**: Delete key on graceful shutdown
-
-**Failover Flow**:
-
-```
-1. Leader Failure Detected (etcd lease expires)
-   │
-2. Followers Watch for Lease Expiry
-   │
-3. New Election Round
-   ├─ All followers campaign
-   └─ First to acquire lease wins
-   │
-4. New Leader Assumes Control
-   ├─ Load cluster state from Redis
-   ├─ Resume work queue processing
-   └─ Notify followers of leadership
-   │
-5. Followers Sync State
-   └─ Read-only mode, forward requests to leader
-```
-
-### 9. Observability
+### 8. Observability
 
 **Location**: `internal/observability/`
 
@@ -459,7 +402,7 @@ aether_api_rate_limit_exceeded_total{tenant_id}
    │       └─ SET agent:{id} {json}                                │
    │                                                               │
    │ 6. Queue Placement Request                                    │
-   │    └─ Kafka: scheduler.placements                             │
+   │    └─ In-process scheduler placement queue                    │
    │                                                               │
    │ 201 Created                                                   │
    │ {"id": "agent-abc123", "status": "pending"}                  │
@@ -470,9 +413,9 @@ aether_api_rate_limit_exceeded_total{tenant_id}
    [Asynchronously: Scheduler processes placement queue]
 
    │ 7. Scheduler Placement                                        │
-   │    ├─ Consume from Kafka                                      │
-   │    ├─ Find best node (bin packing)                            │
-   │    └─ Assign to node                                          │
+   │    ├─ Dequeue placement request                              │
+   │    ├─ Find best host (bin packing)                            │
+   │    └─ Assign to host                                          │
    │                                                               │
    │ 8. Node VM Creation                                           │
    │    ├─ Create rootfs overlay                                   │
@@ -549,59 +492,28 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 
 ## Deployment Architecture
 
-### Multi-AZ Production Deployment (AWS Example)
+### Single-Region Deployment (AWS Example)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              AWS us-east-1                              │
 │                                                                         │
-│  ┌────────────────────────┐  ┌────────────────────────┐               │
-│  │    Availability Zone A  │  │    Availability Zone B  │               │
-│  │                         │  │                         │               │
-│  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │               │
-│  │  │  API Server 1   │   │  │  │  API Server 2   │   │               │
-│  │  │  Scheduler 1    │   │  │  │  Scheduler 2    │   │               │
-│  │  └─────────────────┘   │  │  └─────────────────┘   │               │
-│  │                         │  │                         │               │
-│  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │               │
-│  │  │ Compute Node 1  │   │  │  │ Compute Node 2  │   │               │
-│  │  │ Compute Node 3  │   │  │  │ Compute Node 4  │   │               │
-│  │  └─────────────────┘   │  │  └─────────────────┘   │               │
-│  │                         │  │                         │               │
-│  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │               │
-│  │  │ PostgreSQL      │   │  │  │ PostgreSQL      │   │               │
-│  │  │ (Primary)       │◀──┼──┼─▶│ (Standby)       │   │               │
-│  │  └─────────────────┘   │  │  └─────────────────┘   │               │
-│  │                         │  │                         │               │
-│  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │               │
-│  │  │ Redis           │◀──┼──┼─▶│ Redis           │   │               │
-│  │  │ (Primary)       │   │  │  │ (Replica)       │   │               │
-│  │  └─────────────────┘   │  │  └─────────────────┘   │               │
-│  │                         │  │                         │               │
-│  │  ┌─────────────────┐   │  │  ┌─────────────────┐   │               │
-│  │  │ etcd Node 1     │◀──┼──┼─▶│ etcd Node 2     │   │               │
-│  │  └─────────────────┘   │  │  └─────────────────┘   │               │
-│  │                         │  │                         │               │
-│  └────────────────────────┘  └────────────────────────┘               │
+│  ┌────────────────────────────────────────────────────────────┐       │
+│  │                     Application Tier                        │       │
+│  │  ┌─────────────────┐   ┌─────────────────┐                 │       │
+│  │  │  API Server      │   │ Compute Host    │                 │       │
+│  │  │  (in-process     │   │ (Firecracker    │                 │       │
+│  │  │   scheduler)     │   │  microVMs)      │                 │       │
+│  │  └─────────────────┘   └─────────────────┘                 │       │
+│  └────────────────────────────────────────────────────────────┘       │
 │                                                                         │
-│  ┌────────────────────────┐                                            │
-│  │    Availability Zone C  │                                            │
-│  │                         │                                            │
-│  │  ┌─────────────────┐   │                                            │
-│  │  │  API Server 3   │   │                                            │
-│  │  │  Scheduler 3    │   │                                            │
-│  │  └─────────────────┘   │                                            │
-│  │                         │                                            │
-│  │  ┌─────────────────┐   │                                            │
-│  │  │ Compute Node 5  │   │                                            │
-│  │  │ Compute Node 6  │   │                                            │
-│  │  └─────────────────┘   │                                            │
-│  │                         │                                            │
-│  │  ┌─────────────────┐   │                                            │
-│  │  │ etcd Node 3     │   │                                            │
-│  │  └─────────────────┘   │                                            │
-│  │                         │                                            │
-│  └────────────────────────┘                                            │
+│  ┌────────────────────────────────────────────────────────────┐       │
+│  │                        Data Tier                            │       │
+│  │  ┌─────────────────┐   ┌─────────────────┐                 │       │
+│  │  │ PostgreSQL (RDS) │   │ Redis           │                 │       │
+│  │  │                  │   │ (ElastiCache)   │                 │       │
+│  │  └─────────────────┘   └─────────────────┘                 │       │
+│  └────────────────────────────────────────────────────────────┘       │
 │                                                                         │
 │  ┌────────────────────────────────────────────────────────────┐       │
 │  │                  Shared Services (Regional)                 │       │
@@ -631,7 +543,7 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 │  │  └──────────────────────────────────────┘         │        │
 │  │                                                     │        │
 │  │  ┌──────────────────────────────────────┐         │        │
-│  │  │  NAT Gateways (multi-AZ)             │         │        │
+│  │  │  NAT Gateway                         │         │        │
 │  │  └──────────────────────────────────────┘         │        │
 │  └───────────────────────────────────────────────────┘        │
 │                         │                                      │
@@ -640,14 +552,8 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 │  │    Private Subnets (10.0.10.0/24, 10.0.11.0/24)   │        │
 │  │                                                     │        │
 │  │  ┌──────────────────────────────────────┐         │        │
-│  │  │  API Servers                         │         │        │
+│  │  │  API Servers (in-process scheduler)  │         │        │
 │  │  │  Security Group: allow 8080 from ALB │         │        │
-│  │  └──────────────────────────────────────┘         │        │
-│  │                                                     │        │
-│  │  ┌──────────────────────────────────────┐         │        │
-│  │  │  Schedulers                          │         │        │
-│  │  │  Security Group: allow 2379-2380     │         │        │
-│  │  │                  (etcd)              │         │        │
 │  │  └──────────────────────────────────────┘         │        │
 │  └───────────────────────────────────────────────────┘        │
 │                         │                                      │
@@ -680,11 +586,6 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 │  │  ┌──────────────────────────────────────┐         │        │
 │  │  │  ElastiCache Redis                   │         │        │
 │  │  │  Security Group: allow 6379 from API │         │        │
-│  │  └──────────────────────────────────────┘         │        │
-│  │                                                     │        │
-│  │  ┌──────────────────────────────────────┐         │        │
-│  │  │  etcd Cluster                        │         │        │
-│  │  │  Security Group: allow 2379-2380     │         │        │
 │  │  └──────────────────────────────────────┘         │        │
 │  └───────────────────────────────────────────────────┘        │
 └───────────────────────────────────────────────────────────────┘
@@ -753,7 +654,7 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 │  Layer 1: Infrastructure Security                               │
 │  ├─ Encrypted at rest (AES-256)                                 │
 │  ├─ Encrypted in transit (TLS 1.3)                              │
-│  ├─ Secrets management (AWS Parameter Store, Vault)             │
+│  ├─ Secrets management (AWS Parameter Store)                    │
 │  ├─ DDoS protection (AWS Shield)                                │
 │  └─ WAF (SQL injection, XSS rules)                              │
 └─────────────────────────────────────────────────────────────────┘
@@ -769,7 +670,7 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 | **SQL injection** | Parameterized queries, input validation, whitelist table names |
 | **Command injection** | Input validation, whitelist allowed values, no shell interpolation |
 | **DDoS** | Rate limiting, AWS Shield, WAF, connection limits |
-| **Credential theft** | No credentials in code, secrets in Parameter Store/Vault, IAM roles |
+| **Credential theft** | No credentials in code, secrets in Parameter Store, IAM roles |
 | **Man-in-the-middle** | TLS 1.3, certificate pinning, HSTS |
 | **Insider threat** | Audit logging, least privilege access, multi-party approval for sensitive operations |
 
@@ -784,10 +685,10 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 - Auto Scaling Group based on CPU (target: 60%)
 - Load balancer distributes traffic round-robin
 
-**Schedulers**:
-- Distributed work queue (Kafka) enables multiple consumers
-- Leader handles placement decisions, followers on standby
-- Scale by sharding (future: shard by tenant or region)
+**Scheduler**:
+- Runs in-process within the API server
+- Best-fit bin packing over registered compute capacity
+- Node capacity tracked via Redis
 
 **Compute Nodes**:
 - Auto Scaling Group based on VM capacity
@@ -797,7 +698,6 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 **Database**:
 - PostgreSQL: Vertical scaling + read replicas
 - Redis: Cluster mode with sharding
-- etcd: 3-5 node cluster (odd number for quorum)
 
 ### Performance Targets
 
@@ -816,10 +716,7 @@ aether_api_rate_limit_exceeded_total{tenant_id}
 - **Solution**: Write to Redis first (fast), async persist to PostgreSQL
 
 **Bottleneck**: Scheduler placement latency at scale
-- **Solution**: Distributed scheduler with sharding
-
-**Bottleneck**: etcd lease renewals under load
-- **Solution**: Batch lease renewals, use longer lease TTL (5s)
+- **Solution**: In-process best-fit placement with cached node stats
 
 **Bottleneck**: Firecracker cold start time
 - **Solution**: Pre-warmed VM pool (future optimization)
@@ -859,7 +756,6 @@ type TenantTierProvider interface { ... }
 
 - Redis down → Scheduler continues with stale node stats
 - PostgreSQL down → API returns cached data (read-only mode)
-- Leader failure → Automatic failover to follower
 
 ### 5. Idempotency
 
@@ -883,7 +779,7 @@ All operations are idempotent:
 | Component | Language | Framework/Library |
 |-----------|----------|-------------------|
 | API Server | Go 1.24 | gorilla/mux, net/http |
-| Scheduler | Go 1.24 | etcd client, Kafka client |
+| Scheduler | Go 1.24 | in-process queue, slog |
 | Runtime | Go 1.24 | os/exec, slog |
 | CLI | Go 1.24 | cobra |
 
@@ -893,7 +789,6 @@ All operations are idempotent:
 |-------|---------|--------|
 | PostgreSQL 14 | Durable state, audit logs | db.r5.xlarge (4 vCPU, 32 GB) |
 | Redis 7 | Cache, locks, rate limiting | cache.r5.large (2 vCPU, 13 GB) |
-| etcd 3.5 | Leader election, coordination | t3.medium (2 vCPU, 4 GB) |
 
 ### Observability
 
@@ -906,15 +801,15 @@ All operations are idempotent:
 
 ### Infrastructure
 
-| Service | AWS | GCP | Azure |
-|---------|-----|-----|-------|
-| Compute | EC2 (i3.metal) | Compute Engine (n2-standard) | VMs (Dv3) |
-| Load Balancer | ALB | Cloud Load Balancing | Application Gateway |
-| Database | RDS PostgreSQL | Cloud SQL | Azure Database |
-| Cache | ElastiCache Redis | Memorystore | Azure Cache |
-| Object Storage | S3 | Cloud Storage | Blob Storage |
-| Secrets | Parameter Store | Secret Manager | Key Vault |
-| Monitoring | CloudWatch | Cloud Monitoring | Azure Monitor |
+| Service | AWS | GCP |
+|---------|-----|-----|
+| Compute | EC2 (i3.metal) | Compute Engine (n2-standard) |
+| Load Balancer | ALB | Cloud Load Balancing |
+| Database | RDS PostgreSQL | Cloud SQL |
+| Cache | ElastiCache Redis | Memorystore |
+| Object Storage | S3 | Cloud Storage |
+| Secrets | Parameter Store | Secret Manager |
+| Monitoring | CloudWatch | Cloud Monitoring |
 
 ### CI/CD
 
@@ -934,12 +829,12 @@ All operations are idempotent:
 Key architectural decisions are documented in Architecture Decision Records (ADRs). See:
 
 - [ADR-001: Use Firecracker for VM Isolation](./adr/001-firecracker-vms.md)
-- [ADR-002: Distributed Scheduler with Leader Election](./adr/002-distributed-scheduler.md)
+- [ADR-002: Distributed Scheduler with Leader Election](./adr/002-distributed-scheduler.md) (superseded: the scheduler is now in-process and single-region, see CHANGELOG)
 - [ADR-003: PostgreSQL + Redis for State Management](./adr/003-state-management.md)
 - [ADR-004: JWT Authentication](./adr/004-jwt-authentication.md)
 - [ADR-005: Rate Limiting with Token Bucket](./adr/005-rate-limiting.md)
 - [ADR-006: OpenTelemetry for Observability](./adr/006-opentelemetry.md)
-- [ADR-007: Multi-AZ Deployment Strategy](./adr/007-multi-az-deployment.md)
+- [ADR-007: Multi-AZ Deployment Strategy](./adr/007-multi-az-deployment.md) (superseded: Aether is single-region, see CHANGELOG)
 - [ADR-008: Terraform for Infrastructure as Code](./adr/008-terraform-iac.md)
 
 ---
@@ -986,7 +881,6 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for details.
 ## References
 
 - [Firecracker Documentation](https://github.com/firecracker-microvm/firecracker/tree/main/docs)
-- [etcd Documentation](https://etcd.io/docs/)
 - [OpenTelemetry Go SDK](https://opentelemetry.io/docs/instrumentation/go/)
 - [PostgreSQL High Availability](https://www.postgresql.org/docs/current/high-availability.html)
 - [AWS Well-Architected Framework](https://aws.amazon.com/architecture/well-architected/)
