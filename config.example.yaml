@@ -1,5 +1,5 @@
 # Aether Configuration
-# Copy this file to config.yaml and customize for your environment
+# Copy this file to config.yaml and customize for your environment.
 
 # HTTP Server Configuration
 server:
@@ -9,23 +9,11 @@ server:
   enable_cors: false
   enable_auth: true
 
-# Scheduler Configuration
+# Scheduler Configuration (single-region, in-process)
 scheduler:
-  # Mode: "local" for single-instance or "distributed" for multi-instance
-  mode: local
-
-  # Local scheduler settings
   strategy: bin-packing  # Options: bin-packing, spread, best-fit
   interval: 1s
   event_buffer_size: 100
-
-  # Distributed scheduler settings (required when mode=distributed)
-  scheduler_id: ""        # Unique scheduler ID (e.g., "scheduler-1")
-  instance_id: ""         # Instance ID (e.g., pod name)
-  hostname: ""            # Hostname for this instance
-  virtual_nodes: 100      # Virtual nodes for consistent hashing
-  heartbeat_interval: 15s
-  num_workers: 10         # Worker goroutines per Kafka partition
 
 # PostgreSQL Database Configuration
 database:
@@ -39,30 +27,11 @@ database:
   max_idle_conns: 5
   conn_max_lifetime: 5m
 
-# Redis Configuration (required for distributed mode)
+# Redis Configuration (used for rate limiting)
 redis:
   address: localhost:6379
   password: ""            # Set via AETHER_REDIS_PASSWORD env var
   db: 0
-  node_ttl: 60s
-
-# Kafka Configuration (required for distributed mode)
-kafka:
-  brokers:
-    - localhost:9092
-  topic: aether.scheduling.requests
-  dlq_topic: aether.scheduling.dlq
-  consumer_group: aether-schedulers
-  max_retries: 3
-  request_timeout: 30s
-  partition_strategy: tenant  # Options: tenant, round-robin
-
-# Etcd Configuration (required for distributed mode)
-etcd:
-  endpoints:
-    - localhost:2379
-  key_prefix: /aether/scheduler/shards
-  session_ttl: 30
 
 # Observability Configuration
 observability:
@@ -84,11 +53,8 @@ observability:
 security:
   jwt_secret_key: ""      # Set via AETHER_SECURITY_JWT_SECRET_KEY env var (min 32 chars)
   jwt_token_duration: 1h
-  vault_enabled: false
-  vault_address: http://localhost:8200
-  vault_token: ""         # Set via AETHER_SECURITY_VAULT_TOKEN env var
 
-# Environment-specific configurations can be set via environment variables:
+# Environment-specific configuration can be set via environment variables:
 # AETHER_SERVER_ADDRESS=":8080"
 # AETHER_DATABASE_PASSWORD="secretpassword"
 # AETHER_SECURITY_JWT_SECRET_KEY="your-secret-key-min-32-chars"

@@ -25,12 +25,6 @@ type Config struct {
 	// Redis configuration
 	Redis RedisConfig `mapstructure:"redis"`
 
-	// Kafka configuration
-	Kafka KafkaConfig `mapstructure:"kafka"`
-
-	// Etcd configuration
-	Etcd EtcdConfig `mapstructure:"etcd"`
-
 	// Observability configuration
 	Observability ObservabilityConfig `mapstructure:"observability"`
 
@@ -48,23 +42,12 @@ type ServerConfig struct {
 	AllowedOrigins []string      `mapstructure:"allowed_origins"`
 }
 
-// SchedulerConfig holds scheduler configuration.
+// SchedulerConfig holds scheduler configuration for the single-region,
+// in-process scheduler.
 type SchedulerConfig struct {
-	// Mode: "local" or "distributed"
-	Mode string `mapstructure:"mode"`
-
-	// Local scheduler settings
 	Strategy        string        `mapstructure:"strategy"`
 	Interval        time.Duration `mapstructure:"interval"`
 	EventBufferSize int           `mapstructure:"event_buffer_size"`
-
-	// Distributed scheduler settings
-	SchedulerID       string        `mapstructure:"scheduler_id"`
-	InstanceID        string        `mapstructure:"instance_id"`
-	Hostname          string        `mapstructure:"hostname"`
-	VirtualNodes      int           `mapstructure:"virtual_nodes"`
-	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
-	NumWorkers        int           `mapstructure:"num_workers"`
 }
 
 // DatabaseConfig holds PostgreSQL configuration.
@@ -81,30 +64,11 @@ type DatabaseConfig struct {
 	MigrationsPath  string        `mapstructure:"migrations_path"`
 }
 
-// RedisConfig holds Redis configuration.
+// RedisConfig holds Redis configuration (used for rate limiting).
 type RedisConfig struct {
-	Address  string        `mapstructure:"address"`
-	Password string        `mapstructure:"password"`
-	DB       int           `mapstructure:"db"`
-	NodeTTL  time.Duration `mapstructure:"node_ttl"`
-}
-
-// KafkaConfig holds Kafka configuration.
-type KafkaConfig struct {
-	Brokers           []string      `mapstructure:"brokers"`
-	Topic             string        `mapstructure:"topic"`
-	DLQTopic          string        `mapstructure:"dlq_topic"`
-	ConsumerGroup     string        `mapstructure:"consumer_group"`
-	MaxRetries        int           `mapstructure:"max_retries"`
-	RequestTimeout    time.Duration `mapstructure:"request_timeout"`
-	PartitionStrategy string        `mapstructure:"partition_strategy"`
-}
-
-// EtcdConfig holds etcd configuration.
-type EtcdConfig struct {
-	Endpoints  []string `mapstructure:"endpoints"`
-	KeyPrefix  string   `mapstructure:"key_prefix"`
-	SessionTTL int      `mapstructure:"session_ttl"`
+	Address  string `mapstructure:"address"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
 }
 
 // ObservabilityConfig holds observability configuration.
@@ -128,9 +92,6 @@ type ObservabilityConfig struct {
 type SecurityConfig struct {
 	JWTSecretKey     string        `mapstructure:"jwt_secret_key"`
 	JWTTokenDuration time.Duration `mapstructure:"jwt_token_duration"`
-	VaultEnabled     bool          `mapstructure:"vault_enabled"`
-	VaultAddress     string        `mapstructure:"vault_address"`
-	VaultToken       string        `mapstructure:"vault_token"`
 
 	// Asymmetric JWT signing (RS256). When both paths are set, RS256 is used
 	// instead of the symmetric HS256 secret above.
@@ -204,9 +165,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("scheduler.strategy", "bin-packing")
 	v.SetDefault("scheduler.interval", 1*time.Second)
 	v.SetDefault("scheduler.event_buffer_size", 100)
-	v.SetDefault("scheduler.virtual_nodes", 100)
-	v.SetDefault("scheduler.heartbeat_interval", 15*time.Second)
-	v.SetDefault("scheduler.num_workers", 10)
 
 	// Database defaults
 	v.SetDefault("database.host", "localhost")
@@ -222,21 +180,6 @@ func setDefaults(v *viper.Viper) {
 	// Redis defaults
 	v.SetDefault("redis.address", "localhost:6379")
 	v.SetDefault("redis.db", 0)
-	v.SetDefault("redis.node_ttl", 60*time.Second)
-
-	// Kafka defaults
-	v.SetDefault("kafka.brokers", []string{"localhost:9092"})
-	v.SetDefault("kafka.topic", "aether.scheduling.requests")
-	v.SetDefault("kafka.dlq_topic", "aether.scheduling.dlq")
-	v.SetDefault("kafka.consumer_group", "aether-schedulers")
-	v.SetDefault("kafka.max_retries", 3)
-	v.SetDefault("kafka.request_timeout", 30*time.Second)
-	v.SetDefault("kafka.partition_strategy", "tenant")
-
-	// Etcd defaults
-	v.SetDefault("etcd.endpoints", []string{"localhost:2379"})
-	v.SetDefault("etcd.key_prefix", "/aether/scheduler/shards")
-	v.SetDefault("etcd.session_ttl", 30)
 
 	// Observability defaults
 	v.SetDefault("observability.log_level", "info")
@@ -249,7 +192,6 @@ func setDefaults(v *viper.Viper) {
 
 	// Security defaults
 	v.SetDefault("security.jwt_token_duration", 1*time.Hour)
-	v.SetDefault("security.vault_enabled", false)
 }
 
 // Validate validates the configuration.
@@ -260,19 +202,6 @@ func (c *Config) Validate() error {
 	}
 
 	// Scheduler validation
-	if c.Scheduler.Mode != "local" && c.Scheduler.Mode != "distributed" {
-		return fmt.Errorf("scheduler.mode must be 'local' or 'distributed'")
-	}
-
-	if c.Scheduler.Mode == "distributed" {
-		if c.Scheduler.SchedulerID == "" {
-			return fmt.Errorf("scheduler.scheduler_id is required in distributed mode")
-		}
-		if c.Scheduler.InstanceID == "" {
-			return fmt.Errorf("scheduler.instance_id is required in distributed mode")
-		}
-	}
-
 	validStrategies := map[string]bool{
 		"bin-packing": true,
 		"spread":      true,
@@ -294,36 +223,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Database.User == "" {
 		return fmt.Errorf("database.user is required")
-	}
-
-	// Redis validation (only in distributed mode)
-	if c.Scheduler.Mode == "distributed" {
-		if c.Redis.Address == "" {
-			return fmt.Errorf("redis.address is required in distributed mode")
-		}
-	}
-
-	// Kafka validation (only in distributed mode)
-	if c.Scheduler.Mode == "distributed" {
-		if len(c.Kafka.Brokers) == 0 {
-			return fmt.Errorf("kafka.brokers is required in distributed mode")
-		}
-		if c.Kafka.Topic == "" {
-			return fmt.Errorf("kafka.topic is required in distributed mode")
-		}
-		if c.Kafka.ConsumerGroup == "" {
-			return fmt.Errorf("kafka.consumer_group is required in distributed mode")
-		}
-		if c.Kafka.PartitionStrategy != "tenant" && c.Kafka.PartitionStrategy != "round-robin" {
-			return fmt.Errorf("kafka.partition_strategy must be 'tenant' or 'round-robin'")
-		}
-	}
-
-	// Etcd validation (only in distributed mode)
-	if c.Scheduler.Mode == "distributed" {
-		if len(c.Etcd.Endpoints) == 0 {
-			return fmt.Errorf("etcd.endpoints is required in distributed mode")
-		}
 	}
 
 	// Security validation

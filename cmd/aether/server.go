@@ -22,7 +22,6 @@ import (
 	"github.com/dnakitare/aether/internal/runtime/vm"
 	"github.com/dnakitare/aether/internal/scaler"
 	"github.com/dnakitare/aether/internal/scheduler"
-	"github.com/dnakitare/aether/internal/scheduler/distributed"
 	"github.com/dnakitare/aether/internal/state"
 	"github.com/dnakitare/aether/internal/tenant"
 	"github.com/dnakitare/aether/migrations"
@@ -32,13 +31,10 @@ import (
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Start the Aether API server",
-	Long: `Start the Aether API server with distributed scheduler support.
+	Long: `Start the Aether API server.
 
-The server can run in two modes:
-  - local:       Single-instance in-memory scheduler
-  - distributed: Multi-instance distributed scheduler with etcd, Kafka, and Redis
-
-Mode is configured via config file or environment variables.`,
+Runs a single-instance, single-region control plane: in-process scheduler,
+PostgreSQL state, and the HTTP API.`,
 	RunE: runServer,
 }
 
@@ -60,176 +56,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	slog.SetDefault(logger)
 
 	logger.InfoContext(ctx, "starting Aether server",
-		"mode", cfg.Scheduler.Mode,
 		"address", cfg.Server.Address,
 	)
-
-	// Initialize distributed scheduler components if in distributed mode
-	var (
-		shardManager *distributed.ShardManager
-		nodeRegistry *distributed.NodeRegistry
-		queue        distributed.Queue
-	)
-
-	if cfg.Scheduler.Mode == "distributed" {
-		logger.InfoContext(ctx, "initializing distributed scheduler components",
-			"scheduler_id", cfg.Scheduler.SchedulerID,
-			"instance_id", cfg.Scheduler.InstanceID,
-		)
-
-		// Create shard manager
-		shardConfig := distributed.ShardConfig{
-			EtcdEndpoints:     cfg.Etcd.Endpoints,
-			KeyPrefix:         cfg.Etcd.KeyPrefix,
-			SchedulerID:       cfg.Scheduler.SchedulerID,
-			InstanceID:        cfg.Scheduler.InstanceID,
-			Hostname:          cfg.Scheduler.Hostname,
-			SessionTTL:        cfg.Etcd.SessionTTL,
-			HeartbeatInterval: cfg.Scheduler.HeartbeatInterval,
-			VirtualNodes:      cfg.Scheduler.VirtualNodes,
-		}
-
-		shardManager, err = distributed.NewShardManager(logger, shardConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create shard manager: %w", err)
-		}
-		defer func() {
-			if err := shardManager.Stop(ctx); err != nil {
-				logger.Error("failed to stop shard manager", "error", err)
-			}
-		}()
-
-		if err := shardManager.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start shard manager: %w", err)
-		}
-
-		logger.InfoContext(ctx, "shard manager started")
-
-		// Create node registry
-		nodeRegistryConfig := distributed.NodeRegistryConfig{
-			RedisAddr:     cfg.Redis.Address,
-			RedisPassword: cfg.Redis.Password,
-			RedisDB:       cfg.Redis.DB,
-			KeyPrefix:     "aether",
-			NodeTTL:       cfg.Redis.NodeTTL,
-		}
-
-		nodeRegistry, err = distributed.NewNodeRegistry(logger, nodeRegistryConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create node registry: %w", err)
-		}
-		defer func() {
-			if err := nodeRegistry.Close(); err != nil {
-				logger.Error("failed to close node registry", "error", err)
-			}
-		}()
-
-		logger.InfoContext(ctx, "node registry initialized")
-
-		// Create distributed queue (with automatic fallback to in-memory if Kafka unavailable)
-		queueConfig := distributed.QueueConfig{
-			Brokers:           cfg.Kafka.Brokers,
-			Topic:             cfg.Kafka.Topic,
-			DLQTopic:          cfg.Kafka.DLQTopic,
-			ConsumerGroup:     cfg.Kafka.ConsumerGroup,
-			NumWorkers:        cfg.Scheduler.NumWorkers,
-			MaxRetries:        cfg.Kafka.MaxRetries,
-			RequestTimeout:    cfg.Kafka.RequestTimeout,
-			PartitionStrategy: cfg.Kafka.PartitionStrategy,
-		}
-
-		queue, err = distributed.NewQueue(logger, queueConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create queue: %w", err)
-		}
-		defer func() {
-			if err := queue.Stop(ctx); err != nil {
-				logger.Error("failed to stop queue", "error", err)
-			}
-		}()
-
-		// Register placement handler
-		placer := scheduler.NewPlacer(scheduler.BinPacking)
-		queue.RegisterHandler(func(ctx context.Context, req *distributed.SchedulingRequest) error {
-			logger.InfoContext(ctx, "received scheduling request",
-				"agent_id", req.AgentID,
-				"tenant_id", req.TenantID,
-			)
-
-			// Get available nodes for this scheduler instance
-			nodes, err := nodeRegistry.GetOwnedNodes(ctx, cfg.Scheduler.SchedulerID)
-			if err != nil {
-				logger.ErrorContext(ctx, "failed to get owned nodes",
-					"scheduler_id", cfg.Scheduler.SchedulerID,
-					"error", err,
-				)
-				return fmt.Errorf("failed to get nodes: %w", err)
-			}
-
-			if len(nodes) == 0 {
-				logger.WarnContext(ctx, "no nodes available for scheduling",
-					"scheduler_id", cfg.Scheduler.SchedulerID,
-				)
-				return fmt.Errorf("no nodes available")
-			}
-
-			// Convert SchedulingRequest to AgentRequest for placement
-			agentReq := &scheduler.AgentRequest{
-				Config: api.AgentConfig{
-					ID:       req.AgentID,
-					TenantID: req.TenantID,
-				},
-				Resources:   req.Resources,
-				Constraints: req.Constraints,
-				Priority:    req.Priority,
-				CreatedAt:   time.Now(),
-			}
-
-			// Select best node using placement strategy
-			selectedNode, err := placer.SelectNode(agentReq, nodes)
-			if err != nil {
-				logger.ErrorContext(ctx, "failed to select node",
-					"agent_id", req.AgentID,
-					"available_nodes", len(nodes),
-					"error", err,
-				)
-				return fmt.Errorf("failed to select node: %w", err)
-			}
-
-			// Try to allocate agent on the selected node
-			success, err := nodeRegistry.TryAllocate(ctx, selectedNode.ID, req.AgentID, req.Resources)
-			if err != nil {
-				logger.ErrorContext(ctx, "failed to allocate agent",
-					"agent_id", req.AgentID,
-					"node_id", selectedNode.ID,
-					"error", err,
-				)
-				return fmt.Errorf("failed to allocate: %w", err)
-			}
-
-			if !success {
-				logger.WarnContext(ctx, "allocation failed - node resources changed",
-					"agent_id", req.AgentID,
-					"node_id", selectedNode.ID,
-				)
-				return fmt.Errorf("allocation failed due to concurrent modification")
-			}
-
-			logger.InfoContext(ctx, "agent successfully scheduled",
-				"agent_id", req.AgentID,
-				"node_id", selectedNode.ID,
-				"tenant_id", req.TenantID,
-			)
-
-			return nil
-		})
-
-		if err := queue.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start distributed queue: %w", err)
-		}
-
-		logger.InfoContext(ctx, "distributed queue started")
-	}
 
 	// Initialize PostgreSQL state store.
 	// DATABASE_URL takes priority; fall back to the structured config block.
@@ -468,14 +296,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	})
-	if cfg.Scheduler.Mode == "distributed" {
-		if shardManager != nil {
-			apiSrv.RegisterHealthCheck("etcd", shardManager.Health)
-		}
-		if queue != nil {
-			apiSrv.RegisterHealthCheck("kafka", queue.Health)
-		}
-	}
 
 	// Start API server
 	if err := apiSrv.Start(ctx); err != nil {
@@ -488,15 +308,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}()
 
 	logger.InfoContext(ctx, "Aether server started successfully")
-	logger.InfoContext(ctx, "scheduler mode", "mode", cfg.Scheduler.Mode)
-	if cfg.Scheduler.Mode == "distributed" {
-		logger.InfoContext(ctx, "distributed components ready",
-			"scheduler_id", cfg.Scheduler.SchedulerID,
-			"etcd", cfg.Etcd.Endpoints,
-			"kafka", cfg.Kafka.Brokers,
-			"redis", cfg.Redis.Address,
-		)
-	}
 
 	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
@@ -509,34 +320,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	logger.InfoContext(ctx, "shutting down server")
 
-	// Graceful shutdown with timeout
-	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	// Stop distributed components
-	if cfg.Scheduler.Mode == "distributed" {
-		if queue != nil {
-			logger.InfoContext(shutdownCtx, "stopping distributed queue")
-			if err := queue.Stop(shutdownCtx); err != nil {
-				logger.ErrorContext(shutdownCtx, "error stopping queue", "error", err)
-			}
-		}
-
-		if nodeRegistry != nil {
-			logger.InfoContext(shutdownCtx, "closing node registry")
-			if err := nodeRegistry.Close(); err != nil {
-				logger.ErrorContext(shutdownCtx, "error closing node registry", "error", err)
-			}
-		}
-
-		if shardManager != nil {
-			logger.InfoContext(shutdownCtx, "stopping shard manager")
-			if err := shardManager.Stop(shutdownCtx); err != nil {
-				logger.ErrorContext(shutdownCtx, "error stopping shard manager", "error", err)
-			}
-		}
-	}
-
+	// Deferred Stop calls (API server, scheduler, DB) run as this function
+	// returns and handle their own teardown.
 	logger.InfoContext(ctx, "server stopped")
 	return nil
 }

@@ -33,9 +33,6 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Server.Address != ":8080" {
 		t.Errorf("default server.address = %q, want %q", cfg.Server.Address, ":8080")
 	}
-	if cfg.Scheduler.Mode != "local" {
-		t.Errorf("default scheduler.mode = %q, want %q", cfg.Scheduler.Mode, "local")
-	}
 	if cfg.Database.Host != "localhost" {
 		t.Errorf("default database.host = %q, want %q", cfg.Database.Host, "localhost")
 	}
@@ -67,7 +64,6 @@ func TestLoad_EnvironmentVariables(t *testing.T) {
 
 	// Override fields that have registered defaults.
 	t.Setenv("AETHER_SERVER_ADDRESS", ":9090")
-	t.Setenv("AETHER_SCHEDULER_MODE", "local")
 	t.Setenv("AETHER_SCHEDULER_STRATEGY", "spread")
 	t.Setenv("AETHER_DATABASE_HOST", "db.example.com")
 	t.Setenv("AETHER_DATABASE_PORT", "5433")
@@ -89,7 +85,6 @@ func TestLoad_EnvironmentVariables(t *testing.T) {
 	}{
 		{"server.address", cfg.Server.Address, ":9090"},
 		{"server.enable_auth", cfg.Server.EnableAuth, false},
-		{"scheduler.mode", cfg.Scheduler.Mode, "local"},
 		{"scheduler.strategy", cfg.Scheduler.Strategy, "spread"},
 		{"database.host", cfg.Database.Host, "db.example.com"},
 		{"database.port", cfg.Database.Port, 5433},
@@ -113,7 +108,6 @@ func TestValidate_LocalMode(t *testing.T) {
 			Address: ":8080",
 		},
 		Scheduler: SchedulerConfig{
-			Mode:     "local",
 			Strategy: "bin-packing",
 		},
 		Database: DatabaseConfig{
@@ -139,98 +133,12 @@ func TestValidate_LocalMode(t *testing.T) {
 	}
 }
 
-func TestValidate_DistributedMode(t *testing.T) {
-	cfg := &Config{
-		Server: ServerConfig{
-			Address: ":8080",
-		},
-		Scheduler: SchedulerConfig{
-			Mode:        "distributed",
-			Strategy:    "bin-packing",
-			SchedulerID: "scheduler-1",
-			InstanceID:  "instance-1",
-		},
-		Database: DatabaseConfig{
-			Host:     "localhost",
-			Port:     5432,
-			Database: "aether",
-			User:     "aether",
-		},
-		Redis: RedisConfig{
-			Address: "localhost:6379",
-		},
-		Kafka: KafkaConfig{
-			Brokers:           []string{"localhost:9092"},
-			Topic:             "test-topic",
-			ConsumerGroup:     "test-group",
-			PartitionStrategy: "tenant",
-		},
-		Etcd: EtcdConfig{
-			Endpoints: []string{"localhost:2379"},
-		},
-		Security: SecurityConfig{
-			JWTSecretKey: "test-secret-key-min-32-chars-long",
-		},
-		Observability: ObservabilityConfig{
-			LogLevel:    "info",
-			LogFormat:   "json",
-			MetricsPort: 9090,
-		},
-	}
-
-	cfg.Server.EnableAuth = true
-
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() failed for valid distributed config: %v", err)
-	}
-}
-
-func TestValidate_InvalidMode(t *testing.T) {
-	cfg := &Config{
-		Server: ServerConfig{
-			Address: ":8080",
-		},
-		Scheduler: SchedulerConfig{
-			Mode:     "invalid",
-			Strategy: "bin-packing",
-		},
-	}
-
-	if err := cfg.Validate(); err == nil {
-		t.Error("Validate() should fail for invalid mode")
-	}
-}
-
-func TestValidate_MissingSchedulerIDInDistributedMode(t *testing.T) {
-	cfg := &Config{
-		Server: ServerConfig{
-			Address: ":8080",
-		},
-		Scheduler: SchedulerConfig{
-			Mode:     "distributed",
-			Strategy: "bin-packing",
-			// Missing SchedulerID
-		},
-		Database: DatabaseConfig{
-			Host:     "localhost",
-			Port:     5432,
-			Database: "aether",
-			User:     "aether",
-		},
-	}
-
-	if err := cfg.Validate(); err == nil {
-		t.Error("Validate() should fail when scheduler_id is missing in distributed mode")
-	}
-}
-
 func TestValidate_InvalidStrategy(t *testing.T) {
 	cfg := &Config{
 		Server: ServerConfig{
 			Address: ":8080",
 		},
 		Scheduler: SchedulerConfig{
-			Mode:     "local",
 			Strategy: "invalid-strategy",
 		},
 		Database: DatabaseConfig{
@@ -263,7 +171,6 @@ func TestValidate_ShortJWTSecret(t *testing.T) {
 			EnableAuth: true,
 		},
 		Scheduler: SchedulerConfig{
-			Mode:     "local",
 			Strategy: "bin-packing",
 		},
 		Database: DatabaseConfig{
@@ -293,7 +200,6 @@ func TestValidate_InvalidLogLevel(t *testing.T) {
 			Address: ":8080",
 		},
 		Scheduler: SchedulerConfig{
-			Mode:     "local",
 			Strategy: "bin-packing",
 		},
 		Database: DatabaseConfig{
@@ -437,7 +343,6 @@ func TestDefaults_TimeDurations(t *testing.T) {
 		{"server.read_timeout", cfg.Server.ReadTimeout, 15 * time.Second},
 		{"server.write_timeout", cfg.Server.WriteTimeout, 15 * time.Second},
 		{"scheduler.interval", cfg.Scheduler.Interval, 1 * time.Second},
-		{"scheduler.heartbeat_interval", cfg.Scheduler.HeartbeatInterval, 15 * time.Second},
 		{"database.conn_max_lifetime", cfg.Database.ConnMaxLifetime, 5 * time.Minute},
 		{"security.jwt_token_duration", cfg.Security.JWTTokenDuration, 1 * time.Hour},
 	}

@@ -12,11 +12,8 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/dnakitare/aether/internal/auth"
-	"github.com/dnakitare/aether/internal/backup"
-	"github.com/dnakitare/aether/internal/ha"
 	"github.com/dnakitare/aether/internal/scheduler"
 	"github.com/dnakitare/aether/internal/state"
 	pkgapi "github.com/dnakitare/aether/pkg/api"
@@ -29,15 +26,12 @@ type ChaosEnvironment struct {
 	// Infrastructure
 	DB          *sql.DB
 	RedisClient *redis.Client
-	EtcdClient  *clientv3.Client
 	Logger      *slog.Logger
 
 	// Core components
 	Scheduler  *scheduler.Scheduler
 	StateStore *state.RedisStore
 	Auth       *auth.JWTManager
-	Backup     *backup.BackupManager
-	HA         *ha.LeaderElection
 
 	// Test data
 	TenantID  pkgapi.TenantID
@@ -70,16 +64,6 @@ func SetupChaosEnvironment(t *testing.T) *ChaosEnvironment {
 	// Setup core components
 	env.setupAuth()
 	env.setupScheduler()
-
-	// Setup backup if database available
-	if env.DB != nil {
-		env.setupBackup()
-	}
-
-	// Setup HA if etcd available
-	if env.EtcdClient != nil {
-		env.setupHA()
-	}
 
 	return env
 }
@@ -124,19 +108,6 @@ func (env *ChaosEnvironment) setupInfrastructure() {
 		if err == nil {
 			env.StateStore = stateStore
 		}
-	}
-
-	// Try to connect to etcd
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"localhost:2379"},
-		DialTimeout: 2 * time.Second,
-	})
-	if err == nil {
-		env.EtcdClient = etcdClient
-		env.Cleanup = append(env.Cleanup, func() {
-			etcdClient.Close()
-		})
-		env.T.Log("Connected to etcd")
 	}
 }
 
@@ -204,47 +175,6 @@ func (env *ChaosEnvironment) setupScheduler() {
 	})
 }
 
-// setupBackup creates backup manager
-func (env *ChaosEnvironment) setupBackup() {
-	if env.DB == nil || env.RedisClient == nil {
-		env.T.Log("PostgreSQL or Redis unavailable, skipping backup setup")
-		return
-	}
-
-	tempDir := env.T.TempDir()
-
-	backupConfig := backup.BackupConfig{
-		BackupDir:     tempDir,
-		RetentionDays: 7,
-		Compression:   true,
-	}
-
-	env.Backup = backup.NewBackupManager(env.Logger, backupConfig, env.DB, env.RedisClient)
-}
-
-// setupHA creates HA leader election
-func (env *ChaosEnvironment) setupHA() {
-	if env.EtcdClient == nil {
-		env.T.Log("etcd unavailable, skipping HA setup")
-		return
-	}
-
-	haConfig := ha.DefaultElectionConfig()
-	haConfig.LeaderName = "chaos-leader"
-	haConfig.SessionTTL = 5
-
-	election, err := ha.NewLeaderElection(env.Logger, haConfig)
-	if err != nil {
-		env.T.Logf("Failed to create HA election: %v", err)
-		return
-	}
-
-	env.HA = election
-	env.Cleanup = append(env.Cleanup, func() {
-		election.Close()
-	})
-}
-
 // TearDown cleans up all test resources
 func (env *ChaosEnvironment) TearDown() {
 	for i := len(env.Cleanup) - 1; i >= 0; i-- {
@@ -279,12 +209,6 @@ func (env *ChaosEnvironment) SkipIfNoInfrastructure(t *testing.T, services ...st
 		case "redis":
 			if env.RedisClient == nil {
 				t.Skip("Redis not available for chaos test")
-			}
-		case "etcd":
-			// EtcdClient uses lazy connection so non-nil doesn't mean etcd is reachable.
-			// env.HA being nil means NewLeaderElection failed (etcd actually unavailable).
-			if env.EtcdClient == nil || env.HA == nil {
-				t.Skip("etcd not available for chaos test")
 			}
 		}
 	}
@@ -397,31 +321,5 @@ func (env *ChaosEnvironment) RestorePostgres() error {
 	}
 
 	env.DB = db
-	return nil
-}
-
-// SimulateEtcdFailure closes etcd connection
-func (env *ChaosEnvironment) SimulateEtcdFailure() error {
-	if env.EtcdClient == nil {
-		return fmt.Errorf("etcd client not initialized")
-	}
-
-	env.T.Log("Simulating etcd failure")
-	return env.EtcdClient.Close()
-}
-
-// RestoreEtcd reconnects to etcd
-func (env *ChaosEnvironment) RestoreEtcd() error {
-	env.T.Log("Restoring etcd connection")
-
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"localhost:2379"},
-		DialTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create etcd client: %w", err)
-	}
-
-	env.EtcdClient = etcdClient
 	return nil
 }

@@ -17,8 +17,6 @@ import (
 
 	"github.com/dnakitare/aether/internal/api"
 	"github.com/dnakitare/aether/internal/auth"
-	"github.com/dnakitare/aether/internal/backup"
-	"github.com/dnakitare/aether/internal/ha"
 	"github.com/dnakitare/aether/internal/ratelimit"
 	"github.com/dnakitare/aether/internal/runtime"
 	"github.com/dnakitare/aether/internal/runtime/vm"
@@ -42,9 +40,6 @@ type TestEnvironment struct {
 	Auth      *auth.JWTManager
 	APIKeys   *auth.APIKeyManager
 	RateLimit *ratelimit.MultiLayerLimiter
-	Backup    *backup.BackupManager
-	Restore   *backup.RestoreManager
-	HA        *ha.LeaderElection
 
 	// API server
 	Server     *api.Server
@@ -84,11 +79,6 @@ func SetupTestEnvironment(t *testing.T) *TestEnvironment {
 	env.setupRuntime()
 	env.setupScheduler()
 	env.setupRateLimit()
-
-	// Setup backup/restore if database available
-	if env.DB != nil {
-		env.setupBackup()
-	}
 
 	// Setup API server
 	env.setupAPIServer()
@@ -298,37 +288,6 @@ func (env *TestEnvironment) setupRateLimit() {
 	}
 }
 
-// setupBackup creates backup/restore managers
-func (env *TestEnvironment) setupBackup() {
-	if env.DB == nil {
-		env.T.Log("PostgreSQL unavailable, skipping backup/restore setup")
-		return
-	}
-
-	tempDir := env.T.TempDir()
-
-	backupConfig := backup.BackupConfig{
-		BackupDir:     tempDir,
-		RetentionDays: 7,
-		Compression:   true,
-	}
-
-	// For integration tests, we need a Redis client (use miniredis if real Redis unavailable)
-	redisClient := env.RedisClient
-	if redisClient == nil {
-		env.T.Log("Redis unavailable for backup tests")
-		return
-	}
-
-	env.Backup = backup.NewBackupManager(env.Logger, backupConfig, env.DB, redisClient)
-
-	restoreConfig := backup.RestoreConfig{
-		BackupDir: tempDir,
-	}
-
-	env.Restore = backup.NewRestoreManager(env.Logger, restoreConfig, env.DB, redisClient)
-}
-
 // setupAPIServer creates HTTP API server for testing
 func (env *TestEnvironment) setupAPIServer() {
 	// For now, create a minimal test server
@@ -437,10 +396,6 @@ func (env *TestEnvironment) SkipIfNoInfrastructure(services ...string) {
 		case "redis":
 			if env.RedisClient == nil {
 				env.T.Skip("Redis not available for integration test")
-			}
-		case "etcd":
-			if env.HA == nil {
-				env.T.Skip("etcd not available for integration test")
 			}
 		}
 	}

@@ -9,9 +9,6 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/go-redis/redis/v8"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // HealthChecker provides health check functionality for the API server.
@@ -173,75 +170,6 @@ func DatabaseHealthCheck(db *sql.DB) HealthCheck {
 		return nil
 	}
 }
-
-// RedisHealthCheck creates a health check for Redis connectivity.
-func RedisHealthCheck(client *redis.Client) HealthCheck {
-	return func(ctx context.Context) error {
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-
-		if err := client.Ping(ctx).Err(); err != nil {
-			return fmt.Errorf("redis ping failed: %w", err)
-		}
-
-		return nil
-	}
-}
-
-// EtcdHealthCheck creates a health check for etcd connectivity.
-func EtcdHealthCheck(client *clientv3.Client) HealthCheck {
-	return func(ctx context.Context) error {
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-
-		// Check etcd cluster health
-		_, err := client.Get(ctx, "health-check", clientv3.WithLimit(1))
-		if err != nil {
-			return fmt.Errorf("etcd connectivity failed: %w", err)
-		}
-
-		return nil
-	}
-}
-
-// KafkaHealthCheck creates a health check for Kafka connectivity.
-// Pass in your Kafka admin client or producer to check connectivity.
-func KafkaHealthCheck(kafkaClient KafkaHealthChecker) HealthCheck {
-	return func(ctx context.Context) error {
-		if kafkaClient == nil {
-			// Kafka not configured, skip check
-			return nil
-		}
-		return kafkaClient.Ping(ctx)
-	}
-}
-
-// KafkaHealthChecker is an interface for checking Kafka health.
-// Implement this interface with your Kafka client (e.g., Shopify/sarama, confluent-kafka-go).
-type KafkaHealthChecker interface {
-	Ping(ctx context.Context) error
-}
-
-// Example implementation for Shopify/sarama:
-//
-// type SaramaHealthChecker struct {
-//     client sarama.Client
-// }
-//
-// func (s *SaramaHealthChecker) Ping(ctx context.Context) error {
-//     brokers := s.client.Brokers()
-//     if len(brokers) == 0 {
-//         return fmt.Errorf("no kafka brokers available")
-//     }
-//
-//     // Check if at least one broker is connected
-//     for _, broker := range brokers {
-//         if broker.Connected() {
-//             return nil
-//         }
-//     }
-//     return fmt.Errorf("no kafka brokers connected")
-// }
 
 // CustomHealthCheck creates a health check from a custom function.
 func CustomHealthCheck(name string, checkFn func(ctx context.Context) error) HealthCheck {
